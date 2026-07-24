@@ -1,0 +1,46 @@
+# Architecture
+
+```text
+SwiftUI shell
+  |-- macOS Keychain
+  |-- AVKit playback and cue timeline
+  `-- MediaPipeline
+       |-- JSON queue and settings stores
+       |-- ffprobe metadata
+       |-- FFmpeg audio extraction
+       |-- bounded Zoom Scribe calls
+       |-- timeline merge and WebVTT
+       |-- Zoom Translator
+       `-- Zoom Summarizer
+```
+
+## Processing lifecycle
+
+1. Probe the source and reject media without audio.
+2. Stream-copy AAC, ALAC, or MP3 when channel count and bitrate are compatible.
+3. Decode other formats to 128 kbps MP3 and downmix to at most two channels.
+4. Bound each part below an 80,000,000-byte target and the configured duration.
+5. Transcribe up to the configured number of parts concurrently.
+6. Restore original-timeline timestamps, sort, and renumber all cues.
+7. Write the original VTT and transcript JSON atomically.
+8. Optionally translate cues while preserving their timestamp markers.
+9. Optionally summarize the transcript, reducing oversized input in chunks.
+10. Write optional translated VTT and summary sidecars and remove temporary audio.
+
+## Security
+
+The Zoom API secret is stored as a generic password in macOS Keychain under
+service `com.tanchunsiong.ZScribeMac.ZoomBuildCredentials`. Queue and settings
+JSON never contain credentials. The app validates credentials locally by signing
+a one-hour HS256 Zoom Build JWT; the first service request is the authoritative
+server-side validation.
+
+HTTP errors include only a bounded response excerpt. Authentication headers and
+credentials are never included in application status or persisted events.
+
+## Failure and recovery
+
+HTTP 429, 502, 503, and 504 responses, plus transient network errors, receive two
+bounded retries. An app session interrupted during a processing state recovers
+that job to queued on the next launch. Successful final sidecars are detected
+when media is added or the queue is restored.
