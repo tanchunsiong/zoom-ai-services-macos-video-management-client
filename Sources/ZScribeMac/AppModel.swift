@@ -4,6 +4,13 @@ import ZScribeCore
 
 @MainActor
 final class AppModel: ObservableObject {
+    enum QueueMediaFilter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case unknownDuration = "Unknown"
+        case withoutAudio = "Without Audio"
+        var id: Self { self }
+    }
+
     enum Section: String, CaseIterable, Identifiable {
         case queue = "Queue"
         case review = "Review"
@@ -28,13 +35,23 @@ final class AppModel: ObservableObject {
     @Published var apiKey = ""
     @Published var hasSavedSecret = false
     @Published var presentedError: String?
+    @Published var queueSearchText = "" {
+        didSet {
+            if oldValue != queueSearchText { beginQueueSearch() }
+        }
+    }
+    @Published var queueMediaFilter: QueueMediaFilter = .all
+    @Published private(set) var isQueueSearchRunning = false
+    @Published private(set) var queueSearchMatches: Set<UUID>?
 
     let paths: AppPaths
     private let store: JSONStore
     private let vault = KeychainCredentialStore()
     private let zoom = ZoomAIClient()
     private let pipeline: MediaPipeline
+    private let queueSearchIndex = QueueSearchIndex()
     private var runTask: Task<Void, Never>?
+    private var queueSearchTask: Task<Void, Never>?
 
     init() {
         do {
@@ -62,6 +79,27 @@ final class AppModel: ObservableObject {
 
     var readyCount: Int { jobs.filter { $0.state == .ready }.count }
     var failedCount: Int { jobs.filter { $0.state == .failed }.count }
+    var unknownDurationCount: Int { jobs.filter { $0.durationSeconds == nil }.count }
+    var withoutAudioCount: Int { jobs.filter { $0.hasAudio == false }.count }
+    var hasQueueSearch: Bool {
+        !queueSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    var filteredJobs: [QueueJob] {
+        jobs.filter { job in
+            let matchesMedia = switch queueMediaFilter {
+            case .all: true
+            case .unknownDuration: job.durationSeconds == nil
+            case .withoutAudio: job.hasAudio == false
+            }
+            return matchesMedia &&
+                (queueSearchMatches == nil || queueSearchMatches?.contains(job.id) == true)
+        }
+    }
+    var queueCountLabel: String {
+        queueMediaFilter == .all && !hasQueueSearch
+            ? "\(jobs.count) job\(jobs.count == 1 ? "" : "s") in queue"
+            : "Showing \(filteredJobs.count) of \(jobs.count) jobs"
+    }
 
     func initialize() async {
         do {
@@ -94,6 +132,7 @@ final class AppModel: ObservableObject {
             }
         guard !additions.isEmpty else { return }
         jobs.append(contentsOf: additions)
+        refreshQueueSearchIfNeeded()
         selectedJobID = additions.first?.id
         notice = "Added \(additions.count) media file\(additions.count == 1 ? "" : "s")"
         tryPersist()
@@ -146,6 +185,7 @@ final class AppModel: ObservableObject {
     func remove(_ id: UUID) {
         guard jobs.first(where: { $0.id == id })?.state.isProcessing != true else { return }
         jobs.removeAll { $0.id == id }
+        refreshQueueSearchIfNeeded()
         if selectedJobID == id { selectedJobID = nil }
         tryPersist()
     }
@@ -181,6 +221,14 @@ final class AppModel: ObservableObject {
             }
         }
         tryPersist()
+    }
+
+    func setQueueMediaFilter(_ filter: QueueMediaFilter) {
+        queueMediaFilter = filter
+    }
+
+    func clearQueueSearch() {
+        queueSearchText = ""
     }
 
     func review(_ id: UUID) {
@@ -286,6 +334,7 @@ final class AppModel: ObservableObject {
     private func replace(_ job: QueueJob) {
         guard let index = jobs.firstIndex(where: { $0.id == job.id }) else { return }
         jobs[index] = job
+        refreshQueueSearchIfNeeded()
     }
 
     private func persist() throws { try store.saveQueue(jobs) }
@@ -295,5 +344,39 @@ final class AppModel: ObservableObject {
     private func show(_ error: Error) {
         presentedError = error.localizedDescription
         notice = error.localizedDescription
+    }
+
+    private func refreshQueueSearchIfNeeded() {
+        if hasQueueSearch { beginQueueSearch() }
+    }
+
+    private func beginQueueSearch() {
+        queueSearchTask?.cancel()
+        let query = queueSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            queueSearchMatches = nil
+            isQueueSearchRunning = false
+            return
+        }
+
+        let snapshot = jobs
+        queueSearchMatches = Set(snapshot.filter {
+            $0.displayName.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }.map(\.id))
+        isQueueSearchRunning = true
+        queueSearchTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+                guard let self else { return }
+                let matches = await self.queueSearchIndex.findMatches(in: snapshot, query: query)
+                try Task.checkCancellation()
+                self.queueSearchMatches = matches
+                self.isQueueSearchRunning = false
+            } catch is CancellationError {
+            } catch {
+                self?.isQueueSearchRunning = false
+                self?.notice = "Search could not read all sidecar files: \(error.localizedDescription)"
+            }
+        }
     }
 }

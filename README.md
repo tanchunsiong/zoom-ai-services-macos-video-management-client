@@ -7,6 +7,8 @@ Scribe, Translator, and Summarizer. This is the macOS counterpart to
 ## Features
 
 - Persistent drag-and-drop media queue with progress, cancellation, retry, and removal.
+- Case-insensitive queue search across filenames, original and translated captions,
+  transcript JSON, and summary sidecars, composed with media-status filters.
 - English, Simplified Chinese, Japanese, Spanish, and Italian transcription.
 - Optional cue-preserving translation, including non-English routes bridged through English.
 - Optional Zoom Summarizer output for each job.

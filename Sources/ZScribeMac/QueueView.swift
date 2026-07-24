@@ -10,14 +10,18 @@ struct QueueView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            searchAndFilters
+            Divider()
             if model.jobs.isEmpty {
                 emptyState
+            } else if model.filteredJobs.isEmpty {
+                noMatchesState
             } else {
                 columnHeaders
                 Divider()
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(model.jobs) { job in
+                        ForEach(model.filteredJobs) { job in
                             QueueRow(job: job)
                             Divider().padding(.leading, 42)
                         }
@@ -36,7 +40,7 @@ struct QueueView: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Media Queue").font(.title2.weight(.semibold))
-                Text("Files process in order; segment uploads run concurrently.")
+                Text(model.queueCountLabel)
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -61,6 +65,65 @@ struct QueueView: View {
             }
         }
         .padding(16)
+    }
+
+    private var searchAndFilters: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(
+                    "Search filename, transcript, or summary",
+                    text: $model.queueSearchText
+                )
+                .textFieldStyle(.plain)
+                .onExitCommand { model.clearQueueSearch() }
+                if model.isQueueSearchRunning {
+                    ProgressView().controlSize(.small)
+                        .help("Searching sidecar text")
+                } else if model.hasQueueSearch {
+                    Button {
+                        model.clearQueueSearch()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help("Clear search")
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(width: 330, height: 30)
+            .background(.background)
+            .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(Color.secondary.opacity(0.35))
+            }
+
+            Picker("Queue filter", selection: Binding(
+                get: { model.queueMediaFilter },
+                set: { model.setQueueMediaFilter($0) }
+            )) {
+                Text("All \(model.jobs.count)").tag(AppModel.QueueMediaFilter.all)
+                Text("Unknown \(model.unknownDurationCount)")
+                    .tag(AppModel.QueueMediaFilter.unknownDuration)
+                Text("Without Audio \(model.withoutAudioCount)")
+                    .tag(AppModel.QueueMediaFilter.withoutAudio)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 430)
+
+            Spacer()
+            if model.hasQueueSearch || model.queueMediaFilter != .all {
+                Text(model.queueCountLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
     }
 
     private var columnHeaders: some View {
@@ -90,6 +153,19 @@ struct QueueView: View {
                 .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var noMatchesState: some View {
+        if model.hasQueueSearch {
+            ContentUnavailableView.search(text: model.queueSearchText)
+        } else {
+            ContentUnavailableView(
+                "No Matching Media",
+                systemImage: "line.3.horizontal.decrease.circle",
+                description: Text("No queue items match this media filter.")
+            )
+        }
     }
 }
 

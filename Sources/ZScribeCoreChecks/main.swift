@@ -8,6 +8,7 @@ struct CoreChecks {
         translationRoutingBridgesThroughEnglish()
         try jwtContainsExpectedClaims()
         try await scribeRequestMatchesContract()
+        try await queueSearchCoversAllArtifactsAndInvalidatesCache()
         audioProfilesMatchZoomCompatibleContainers()
         segmentDurationObservesUploadTarget()
         languageAwareCostEstimate()
@@ -57,6 +58,91 @@ struct CoreChecks {
         precondition(MediaProcessor.profile(for: "mp3").codec == "copy")
         precondition(MediaProcessor.profile(for: "ac3").codec == "libmp3lame")
         precondition(!MediaProcessor.profile(for: "wma").streamCopy)
+    }
+
+    static func queueSearchCoversAllArtifactsAndInvalidatesCache() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zscribe-search-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let filenameJob = QueueJob(sourcePath: directory.appendingPathComponent("Aurora launch.mp4").path)
+        var transcriptJob = QueueJob(sourcePath: directory.appendingPathComponent("transcript.mp4").path)
+        var translatedJob = QueueJob(
+            sourcePath: directory.appendingPathComponent("translated.mp4").path,
+            translationLanguage: "zh-CN"
+        )
+        var jsonJob = QueueJob(sourcePath: directory.appendingPathComponent("json.mp4").path)
+        var summaryJob = QueueJob(sourcePath: directory.appendingPathComponent("summary.mp4").path)
+        let unrelatedJob = QueueJob(sourcePath: directory.appendingPathComponent("unrelated.mp4").path)
+
+        let transcriptURLs = MediaPipeline.sidecarURLs(
+            for: URL(fileURLWithPath: transcriptJob.sourcePath),
+            translationLanguage: ""
+        )
+        try "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nThe aurora is visible."
+            .write(to: transcriptURLs.originalVTT, atomically: true, encoding: .utf8)
+        transcriptJob.originalVttPath = transcriptURLs.originalVTT.path
+
+        let translatedURLs = MediaPipeline.sidecarURLs(
+            for: URL(fileURLWithPath: translatedJob.sourcePath),
+            translationLanguage: "zh-CN"
+        )
+        try "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nAurora translated"
+            .write(to: translatedURLs.translatedVTT, atomically: true, encoding: .utf8)
+        translatedJob.translatedVttPath = translatedURLs.translatedVTT.path
+
+        let jsonURLs = MediaPipeline.sidecarURLs(
+            for: URL(fileURLWithPath: jsonJob.sourcePath),
+            translationLanguage: ""
+        )
+        try #"{"text":"AURORA from transcript JSON"}"#
+            .write(to: jsonURLs.transcriptJSON, atomically: true, encoding: .utf8)
+        jsonJob.transcriptJsonPath = jsonURLs.transcriptJSON.path
+
+        let summaryURLs = MediaPipeline.sidecarURLs(
+            for: URL(fileURLWithPath: summaryJob.sourcePath),
+            translationLanguage: ""
+        )
+        try "# Summary\nThe aurora project launched."
+            .write(to: summaryURLs.summary, atomically: true, encoding: .utf8)
+        summaryJob.summaryPath = summaryURLs.summary.path
+
+        let jobs = [
+            filenameJob, transcriptJob, translatedJob, jsonJob, summaryJob, unrelatedJob
+        ]
+        let index = QueueSearchIndex()
+        let matches = await index.findMatches(in: jobs, query: "aUrOrA")
+        try expect(
+            matches == Set(jobs.dropLast().map(\.id)),
+            "Search filenames and all sidecar formats"
+        )
+
+        let cacheJob = QueueJob(sourcePath: directory.appendingPathComponent("cache.mp4").path)
+        let cacheURLs = MediaPipeline.sidecarURLs(
+            for: URL(fileURLWithPath: cacheJob.sourcePath),
+            translationLanguage: ""
+        )
+        try "cachedone".write(to: cacheURLs.summary, atomically: true, encoding: .utf8)
+        let initialCacheMatches = await index.findMatches(
+            in: [cacheJob], query: "cachedone"
+        )
+        try expect(
+            initialCacheMatches == [cacheJob.id],
+            "Search cache initial read"
+        )
+        try "cachedtwo".write(to: cacheURLs.summary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(2)],
+            ofItemAtPath: cacheURLs.summary.path
+        )
+        let updatedCacheMatches = await index.findMatches(
+            in: [cacheJob], query: "cachedtwo"
+        )
+        try expect(
+            updatedCacheMatches == [cacheJob.id],
+            "Search cache invalidation"
+        )
     }
 
     static func scribeRequestMatchesContract() async throws {
