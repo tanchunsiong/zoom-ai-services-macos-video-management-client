@@ -11,8 +11,11 @@ final class ReviewPlayer: ObservableObject {
     @Published var duration: Double = 0
     @Published var activeCueID: Int?
     @Published var rate: Float = 1
+    @Published var isPreparingPlayback = false
+    @Published var playbackError: String?
     private var observer: Any?
     private var loadedJobID: UUID?
+    private var loadTask: Task<Void, Never>?
 
     init() {
         observer = player.addPeriodicTimeObserver(
@@ -32,13 +35,18 @@ final class ReviewPlayer: ObservableObject {
     }
 
     deinit {
+        loadTask?.cancel()
         if let observer { player.removeTimeObserver(observer) }
     }
 
-    func load(_ job: QueueJob?) {
+    func load(_ job: QueueJob?, settings: UserSettings, paths: AppPaths) {
         guard let job, job.id != loadedJobID else { return }
         loadedJobID = job.id
-        player.replaceCurrentItem(with: AVPlayerItem(url: URL(fileURLWithPath: job.sourcePath)))
+        loadTask?.cancel()
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        isPreparingPlayback = true
+        playbackError = nil
         let captionPath = job.translatedVttPath ?? job.originalVttPath
         if let captionPath, let text = try? String(contentsOfFile: captionPath, encoding: .utf8) {
             cues = WebVTT.parse(text)
@@ -50,6 +58,22 @@ final class ReviewPlayer: ObservableObject {
         } ?? "No summary was generated for this job."
         position = 0
         duration = max(0, job.durationSeconds ?? 0)
+        loadTask = Task { [weak self] in
+            do {
+                let url = try await PlaybackResolver(paths: paths).resolve(
+                    URL(fileURLWithPath: job.sourcePath),
+                    settings: settings
+                )
+                try Task.checkCancellation()
+                guard let self, self.loadedJobID == job.id else { return }
+                self.player.replaceCurrentItem(with: AVPlayerItem(url: url))
+                self.isPreparingPlayback = false
+            } catch is CancellationError {
+            } catch {
+                self?.playbackError = error.localizedDescription
+                self?.isPreparingPlayback = false
+            }
+        }
     }
 
     func togglePlayback() {
@@ -83,15 +107,20 @@ struct ReviewView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let job = model.selectedJob, job.canReview {
+            if let job = model.selectedJob,
+               FileManager.default.fileExists(atPath: job.sourcePath) {
                 HSplitView {
                     playerPane(job)
                         .frame(minWidth: 480)
                     detailPane
                         .frame(minWidth: 300, idealWidth: 380, maxWidth: 520)
                 }
-                .onAppear { playback.load(job) }
-                .onChange(of: job.id) { _, _ in playback.load(job) }
+                .onAppear {
+                    playback.load(job, settings: model.settings, paths: model.paths)
+                }
+                .onChange(of: job.id) { _, _ in
+                    playback.load(job, settings: model.settings, paths: model.paths)
+                }
             } else {
                 ContentUnavailableView(
                     "Nothing to Review",
@@ -115,7 +144,7 @@ struct ReviewView: View {
                 set: { model.selectedJobID = $0 }
             )) {
                 Text("Select a job").tag(UUID?.none)
-                ForEach(model.jobs.filter(\.canReview)) {
+                ForEach(model.jobs) {
                     Text($0.displayName).tag(Optional($0.id))
                 }
             }
@@ -128,6 +157,21 @@ struct ReviewView: View {
         VStack(spacing: 0) {
             VideoPlayer(player: playback.player)
                 .background(.black)
+                .overlay {
+                    if playback.isPreparingPlayback {
+                        ProgressView("Preparing playback...")
+                            .padding(12)
+                            .background(.black.opacity(0.75))
+                            .foregroundStyle(.white)
+                    } else if let error = playback.playbackError {
+                        ContentUnavailableView(
+                            "Playback Failed",
+                            systemImage: "exclamationmark.triangle",
+                            description: Text(error)
+                        )
+                        .foregroundStyle(.white)
+                    }
+                }
             if let active = playback.cues.first(where: { $0.id == playback.activeCueID }) {
                 Text(active.text)
                     .font(.body.weight(.medium))

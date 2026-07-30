@@ -43,6 +43,7 @@ final class AppModel: ObservableObject {
     @Published var queueMediaFilter: QueueMediaFilter = .all
     @Published private(set) var isQueueSearchRunning = false
     @Published private(set) var queueSearchMatches: Set<UUID>?
+    @Published private(set) var lastAddedCount: Int?
 
     let paths: AppPaths
     private let store: JSONStore
@@ -76,9 +77,54 @@ final class AppModel: ObservableObject {
                               summarize: $0.summarize + $1.summarize)
             }
     }
+    var queueActualCost: CostBreakdown? {
+        let values = jobs.compactMap { CostEstimator.actual($0, settings: settings) }
+        guard !values.isEmpty else { return nil }
+        return values.reduce(CostBreakdown(scribe: 0, translate: 0, summarize: 0)) {
+            CostBreakdown(
+                scribe: $0.scribe + $1.scribe,
+                translate: $0.translate + $1.translate,
+                summarize: $0.summarize + $1.summarize
+            )
+        }
+    }
+    var timeCalibration: JobTimeCalibration {
+        JobTimeCalibration.learn(from: jobs)
+    }
+    var queueEstimatedTimeLabel: String {
+        let calibration = timeCalibration
+        return TimeEstimator.aggregateFormat(jobs.map {
+            TimeEstimator.compare($0, settings: settings, calibration: calibration)
+                .estimate.total
+        })
+    }
+    var queueActualTimeLabel: String {
+        TimeEstimator.aggregateFormat(jobs.map {
+            TimeEstimator.actual(for: $0).total
+        })
+    }
+
+    func estimatedTimeLabel(for job: QueueJob) -> String {
+        TimeEstimator.format(
+            TimeEstimator.compare(
+                job,
+                settings: settings,
+                calibration: timeCalibration
+            ).estimate.total
+        )
+    }
+
+    func costLabel(for job: QueueJob) -> String {
+        let estimate = CostEstimator.estimate(job, settings: settings)
+        guard let actual = CostEstimator.actual(job, settings: settings) else {
+            return CostEstimator.format(estimate.total)
+        }
+        return "\(CostEstimator.format(estimate.total)) / \(CostEstimator.format(actual.total))"
+    }
 
     var readyCount: Int { jobs.filter { $0.state == .ready }.count }
     var failedCount: Int { jobs.filter { $0.state == .failed }.count }
+    var activeJobID: UUID? { jobs.first(where: { $0.state.isProcessing })?.id }
     var unknownDurationCount: Int { jobs.filter { $0.durationSeconds == nil }.count }
     var withoutAudioCount: Int { jobs.filter { $0.hasAudio == false }.count }
     var hasQueueSearch: Bool {
@@ -121,22 +167,29 @@ final class AppModel: ObservableObject {
     }
 
     func add(_ urls: [URL]) {
-        let existing = Set(jobs.map(\.sourcePath))
-        let additions = urls
-            .filter { $0.isFileURL && FileManager.default.fileExists(atPath: $0.path) }
-            .filter { !existing.contains($0.standardizedFileURL.path) }
-            .map {
+        Task {
+            let expanded = await Task.detached(priority: .utility) {
+                MediaDiscovery.expand(urls)
+            }.value
+            let additions = expanded.map {
                 MediaPipeline.applyExistingOutputs(to: QueueJob(
                     sourcePath: $0.standardizedFileURL.path
                 ))
             }
-        guard !additions.isEmpty else { return }
-        jobs.append(contentsOf: additions)
-        refreshQueueSearchIfNeeded()
-        selectedJobID = additions.first?.id
-        notice = "Added \(additions.count) media file\(additions.count == 1 ? "" : "s")"
-        tryPersist()
-        Task {
+            lastAddedCount = additions.count
+            guard !additions.isEmpty else {
+                notice = "No supported media files found"
+                return
+            }
+            jobs.append(contentsOf: additions)
+            refreshQueueSearchIfNeeded()
+            selectedJobID = additions.first?.id
+            let recursive = urls.contains {
+                (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            }
+            notice = "Added \(additions.count) media file\(additions.count == 1 ? "" : "s")" +
+                (recursive ? " recursively" : "") + "; \(jobs.count) jobs in queue"
+            tryPersist()
             for job in additions {
                 replace(await pipeline.probe(job, settings: settings))
             }
@@ -148,19 +201,28 @@ final class AppModel: ObservableObject {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
+        panel.allowsOtherFileTypes = true
         panel.allowedContentTypes = [.movie, .audio, .mpeg4Movie, .quickTimeMovie, .mp3, .wav]
+        if panel.runModal() == .OK { add(panel.urls) }
+    }
+
+    func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Add a Media Folder"
+        panel.prompt = "Add Folder"
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
         if panel.runModal() == .OK { add(panel.urls) }
     }
 
     func startQueue() {
         guard !isRunning else {
             isPaused.toggle()
-            notice = isPaused ? "Queue paused after the current stage" : "Queue resumed"
+            notice = isPaused ? "Queue will pause before the next job" : "Queue resumed"
             return
         }
-        runTask = Task { [weak self] in
-            await self?.run()
-        }
+        startJobs(nil)
     }
 
     func cancelCurrent() {
@@ -178,8 +240,15 @@ final class AppModel: ObservableObject {
     }
 
     func retryAllFailed() {
-        for id in jobs.filter({ $0.state == .failed }).map(\.id) { retry(id) }
+        let ids = jobs.filter({ $0.state == .failed }).map(\.id)
+        for id in ids { retry(id) }
         notice = "Failed jobs returned to the queue"
+        if !ids.isEmpty { startJobs(ids) }
+    }
+
+    func retryAndStart(_ id: UUID) {
+        retry(id)
+        startJobs([id])
     }
 
     func remove(_ id: UUID) {
@@ -194,6 +263,8 @@ final class AppModel: ObservableObject {
         update(id) { job in
             guard !job.state.isProcessing else { return }
             job.sourceLanguage = locale
+            job.existingSummaryIsStale = true
+            job.reuseExistingSummary = false
             if job.translationLanguage == locale { job.translationLanguage = "" }
         }
         tryPersist()
@@ -205,6 +276,9 @@ final class AppModel: ObservableObject {
             job.translationLanguage = locale == job.sourceLanguage ? "" : locale
             job.translatedVttPath = nil
             job.summaryPath = nil
+            job.reuseExistingTranslation = false
+            job.reuseExistingSummary = false
+            job.existingSummaryIsStale = true
             if job.state == .ready && !job.translationLanguage.isEmpty {
                 job.report(.queued, progress: 0, "Translation queued")
             }
@@ -223,6 +297,20 @@ final class AppModel: ObservableObject {
         tryPersist()
     }
 
+    func rerunSummary(_ id: UUID) {
+        guard !isRunning,
+              let job = jobs.first(where: { $0.id == id }),
+              job.canReview,
+              job.summarize else { return }
+        update(id) {
+            $0.existingSummaryIsStale = true
+            $0.reuseExistingSummary = false
+            $0.report(.queued, progress: 0, "Summary rerun queued")
+        }
+        tryPersist()
+        startJobs([id])
+    }
+
     func setQueueMediaFilter(_ filter: QueueMediaFilter) {
         queueMediaFilter = filter
     }
@@ -232,6 +320,11 @@ final class AppModel: ObservableObject {
     }
 
     func review(_ id: UUID) {
+        selectedJobID = id
+        selectedSection = .review
+    }
+
+    func preview(_ id: UUID) {
         selectedJobID = id
         selectedSection = .review
     }
@@ -272,7 +365,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func run() async {
+    private func startJobs(_ ids: [UUID]?) {
+        guard !isRunning, runTask == nil else { return }
+        runTask = Task { [weak self] in
+            await self?.run(jobIDs: ids)
+        }
+    }
+
+    private func run(jobIDs: [UUID]? = nil) async {
         do {
             guard let credentials = try vault.load(), credentials.isComplete else {
                 selectedSection = .settings
@@ -287,7 +387,10 @@ final class AppModel: ObservableObject {
                 isPaused = false
                 runTask = nil
             }
-            for id in jobs.filter({ [.queued, .canceled].contains($0.state) }).map(\.id) {
+            let pendingIDs = jobIDs ?? jobs
+                .filter({ [.queued, .canceled].contains($0.state) })
+                .map(\.id)
+            for id in pendingIDs {
                 while isPaused {
                     try Task.checkCancellation()
                     try await Task.sleep(for: .milliseconds(200))
@@ -334,6 +437,7 @@ final class AppModel: ObservableObject {
     private func replace(_ job: QueueJob) {
         guard let index = jobs.firstIndex(where: { $0.id == job.id }) else { return }
         jobs[index] = job
+        if job.state.isProcessing { selectedJobID = job.id }
         refreshQueueSearchIfNeeded()
     }
 
@@ -379,4 +483,5 @@ final class AppModel: ObservableObject {
             }
         }
     }
+
 }

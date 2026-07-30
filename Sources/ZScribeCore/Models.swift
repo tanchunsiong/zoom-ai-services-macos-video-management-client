@@ -62,6 +62,10 @@ public struct QueueJob: Codable, Identifiable, Hashable, Sendable {
     public var translatedVttPath: String?
     public var transcriptJsonPath: String?
     public var summaryPath: String?
+    public var reuseExistingTranscript: Bool?
+    public var reuseExistingTranslation: Bool?
+    public var reuseExistingSummary: Bool?
+    public var existingSummaryIsStale: Bool?
     public var events: [JobEvent]
 
     public init(sourcePath: String, sourceLanguage: String = "en-US",

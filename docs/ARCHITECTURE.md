@@ -21,6 +21,8 @@ SwiftUI shell
 3. Decode other formats to 128 kbps MP3 and downmix to at most two channels.
 4. Bound each part below an 80,000,000-byte target and the configured duration.
 5. Transcribe up to the configured number of parts concurrently.
+   HTTP 413 halves the byte target to a 10 MB floor; persistent HTTP 503 halves
+   segment duration to a one-minute floor before failing the job.
 6. Restore original-timeline timestamps, sort, and renumber all cues.
 7. Write the original VTT and transcript JSON atomically.
 8. Optionally translate cues while preserving their timestamp markers.
@@ -43,4 +45,6 @@ credentials are never included in application status or persisted events.
 HTTP 429, 502, 503, and 504 responses, plus transient network errors, receive two
 bounded retries. An app session interrupted during a processing state recovers
 that job to queued on the next launch. Successful final sidecars are detected
-when media is added or the queue is restored.
+when media is added or the queue is restored, and each completed artifact is
+reused independently. Playback sources unsupported by AVKit are normalized into
+a content-addressed MOV cache under the work directory.

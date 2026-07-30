@@ -49,21 +49,43 @@ struct ContentView: View {
     }
 
     private var statusBar: some View {
-        HStack {
-            Text(model.notice).lineLimit(1)
-            Spacer()
-            let cost = model.queueEstimate
-            Text("Estimate")
-                .foregroundStyle(.secondary)
-            Text("Scribe \(CostEstimator.format(cost.scribe))")
-            Text("Translate \(CostEstimator.format(cost.translate))")
-            Text("Summary \(CostEstimator.format(cost.summarize))")
-            Text("Total \(CostEstimator.format(cost.total))")
-                .fontWeight(.semibold)
+        VStack(spacing: 3) {
+            HStack {
+                Text(model.notice).lineLimit(1)
+                Spacer()
+                let cost = model.queueEstimate
+                Text("Estimate")
+                    .foregroundStyle(.secondary)
+                Text("Scribe \(CostEstimator.format(cost.scribe))")
+                Text("Translate \(CostEstimator.format(cost.translate))")
+                Text("Summary \(CostEstimator.format(cost.summarize))")
+                Text("Total \(CostEstimator.format(cost.total))")
+                    .fontWeight(.semibold)
+            }
+            HStack {
+                Spacer()
+                if let actual = model.queueActualCost {
+                    Text("Actual")
+                        .foregroundStyle(.secondary)
+                    Text("Scribe \(CostEstimator.format(actual.scribe))")
+                    Text("Translate \(CostEstimator.format(actual.translate))")
+                    Text("Summary \(CostEstimator.format(actual.summarize))")
+                    Text("Total \(CostEstimator.format(actual.total))")
+                        .fontWeight(.semibold)
+                } else {
+                    Text("Actual cost --").foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Spacer()
+                Label("Time estimate \(model.queueEstimatedTimeLabel)", systemImage: "clock")
+                Text("Actual \(model.queueActualTimeLabel)")
+                    .foregroundStyle(.secondary)
+            }
         }
         .font(.caption)
         .padding(.horizontal, 14)
-        .frame(height: 34)
+        .frame(height: 64)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
     }

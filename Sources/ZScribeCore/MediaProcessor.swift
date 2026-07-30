@@ -53,6 +53,8 @@ public enum MediaProcessor {
         workDirectory: URL,
         probe: MediaProbe,
         settings: UserSettings,
+        uploadTargetBytes: Int64? = nil,
+        maximumSegmentDuration: TimeInterval? = nil,
         progress: @escaping (Double) async -> Void
     ) async throws -> [PreparedAudioPart] {
         guard !probe.audioCodec.isEmpty else {
@@ -61,8 +63,14 @@ public enum MediaProcessor {
         }
         try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
         let profile = normalizeProfile(probe)
-        let requested = Double(min(max(settings.segmentMinutes, 1), 30) * 60)
-        let segmentDuration = segmentDuration(probe: probe, profile: profile, requested: requested)
+        let requested = maximumSegmentDuration ??
+            Double(min(max(settings.segmentMinutes, 1), 30) * 60)
+        let segmentDuration = segmentDuration(
+            probe: probe,
+            profile: profile,
+            requested: requested,
+            uploadTargetBytes: uploadTargetBytes
+        )
         let count = max(1, Int(ceil(probe.duration / segmentDuration)))
         var parts: [PreparedAudioPart] = []
 
@@ -123,7 +131,10 @@ public enum MediaProcessor {
     }
 
     public static func segmentDuration(
-        probe: MediaProbe, profile: AudioProfile, requested: TimeInterval
+        probe: MediaProbe,
+        profile: AudioProfile,
+        requested: TimeInterval,
+        uploadTargetBytes: Int64? = nil
     ) -> TimeInterval {
         let bytesPerSecond: Int64
         if let rate = profile.outputBitRate, rate > 0 {
@@ -133,7 +144,10 @@ public enum MediaProcessor {
         } else {
             bytesPerSecond = Int64(max(probe.sampleRate, 48_000) * min(max(probe.channels, 1), 2) * 2)
         }
-        return min(requested, Double(max(1, uploadTargetBytes / bytesPerSecond)))
+        return min(
+            requested,
+            Double(max(1, (uploadTargetBytes ?? Self.uploadTargetBytes) / bytesPerSecond))
+        )
     }
 
     private static let compatibilityProfile = AudioProfile(

@@ -19,11 +19,19 @@ struct QueueView: View {
             } else {
                 columnHeaders
                 Divider()
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(model.filteredJobs) { job in
-                            QueueRow(job: job)
-                            Divider().padding(.leading, 42)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(model.filteredJobs) { job in
+                                QueueRow(job: job)
+                                    .id(job.id)
+                                Divider().padding(.leading, 42)
+                            }
+                        }
+                    }
+                    .onChange(of: model.activeJobID) { _, id in
+                        if let id {
+                            withAnimation { proxy.scrollTo(id, anchor: .center) }
                         }
                     }
                 }
@@ -49,7 +57,12 @@ struct QueueView: View {
                     model.retryAllFailed()
                 }
             }
-            Button("Add Media", systemImage: "plus") { model.chooseFiles() }
+            Menu {
+                Button("Add Files", systemImage: "doc.badge.plus") { model.chooseFiles() }
+                Button("Add Folder", systemImage: "folder.badge.plus") { model.chooseFolder() }
+            } label: {
+                Label("Add Media", systemImage: "plus")
+            }
             if model.isRunning {
                 Button(model.isPaused ? "Resume" : "Pause",
                        systemImage: model.isPaused ? "play.fill" : "pause.fill") {
@@ -195,12 +208,22 @@ private struct QueueRow: View {
         .background(model.selectedJobID == job.id ? Color.accentColor.opacity(0.1) : .clear)
         .onTapGesture { model.selectedJobID = job.id }
         .contextMenu {
+            Button("Preview Media", systemImage: "play.rectangle") {
+                model.preview(job.id)
+            }
             if job.canReview {
                 Button("Review", systemImage: "play.rectangle") { model.review(job.id) }
             }
             Button("Show in Finder", systemImage: "folder") { model.reveal(job.id) }
             if job.state == .failed {
-                Button("Retry", systemImage: "arrow.clockwise") { model.retry(job.id) }
+                Button("Retry", systemImage: "arrow.clockwise") {
+                    model.retryAndStart(job.id)
+                }
+            }
+            if job.canReview && job.summarize {
+                Button("Rerun Summary", systemImage: "text.badge.star") {
+                    model.rerunSummary(job.id)
+                }
             }
             Divider()
             Button("Remove", systemImage: "trash", role: .destructive) { model.remove(job.id) }
@@ -218,7 +241,8 @@ private struct QueueRow: View {
                 Text(job.displayName).lineLimit(1).fontWeight(.medium)
                 HStack(spacing: 8) {
                     Text(job.durationLabel)
-                    Text(CostEstimator.format(CostEstimator.estimate(job, settings: model.settings).total))
+                    Text(model.costLabel(for: job))
+                    Label(model.estimatedTimeLabel(for: job), systemImage: "clock")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -276,8 +300,14 @@ private struct QueueRow: View {
                     .help("Review transcript")
                     .buttonStyle(.borderless)
             } else if job.state == .failed {
-                Button { model.retry(job.id) } label: { Image(systemName: "arrow.clockwise") }
+                Button { model.retryAndStart(job.id) } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
                     .help("Retry")
+                    .buttonStyle(.borderless)
+            } else if !job.state.isProcessing {
+                Button { model.preview(job.id) } label: { Image(systemName: "play.rectangle") }
+                    .help("Preview media")
                     .buttonStyle(.borderless)
             }
             Menu {

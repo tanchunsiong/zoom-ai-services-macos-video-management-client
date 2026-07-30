@@ -36,16 +36,21 @@ public final class ZoomAIClient {
     public func transcribe(
         part: PreparedAudioPart, language: String, credentials: APICredentials
     ) async throws -> TranscriptDocument {
-        let audio = try Data(contentsOf: part.url)
-        let payload: [String: Any] = [
-            "file": "data:\(part.mimeType);base64,\(audio.base64EncodedString())",
-            "config": [
-                "language": language,
-                "channel_separation": false
-            ]
-        ]
-        let root = try await send(
-            service: "Zoom Scribe", url: scribeURL, payload: payload, credentials: credentials
+        let bodyURL = part.url.deletingLastPathComponent().appendingPathComponent(
+            "scribe-\(part.index)-\(UUID().uuidString).json"
+        )
+        defer { try? FileManager.default.removeItem(at: bodyURL) }
+        try Self.writeScribeBody(
+            audioURL: part.url,
+            mimeType: part.mimeType,
+            language: language,
+            to: bodyURL
+        )
+        let root = try await sendFile(
+            service: "Zoom Scribe",
+            url: scribeURL,
+            bodyURL: bodyURL,
+            credentials: credentials
         )
         let result = root["result"] as? [String: Any] ?? root
         let text = firstString(result, ["text_display", "text_lexical", "text"])
@@ -123,7 +128,7 @@ public final class ZoomAIClient {
             var result = try await summarizeText(
                 chunks[0], language: language, task: "full_summary", credentials: credentials
             )
-            result.text = normalizeSummary(result.text)
+            result.text = Self.normalizeSummaryText(result.text)
             return result
         }
 
@@ -158,7 +163,7 @@ public final class ZoomAIClient {
         var final = try await summarizeText(
             combined, language: language, task: "full_summary", credentials: credentials
         )
-        final.text = normalizeSummary(final.text)
+        final.text = Self.normalizeSummaryText(final.text)
         final.inputCharacters += input
         final.outputCharacters += output
         return final
@@ -264,6 +269,81 @@ public final class ZoomAIClient {
         throw URLError(.cannotConnectToHost)
     }
 
+    private func sendFile(
+        service: String,
+        url: URL,
+        bodyURL: URL,
+        credentials: APICredentials
+    ) async throws -> [String: Any] {
+        let retryable = [429, 502, 503, 504]
+        let defaultDelays: [TimeInterval] = [2, 5]
+        for attempt in 0...2 {
+            try Task.checkCancellation()
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(
+                "Bearer \(try ZoomJWT.create(credentials: credentials))",
+                forHTTPHeaderField: "Authorization"
+            )
+            do {
+                let (data, response) = try await session.upload(for: request, fromFile: bodyURL)
+                let http = response as! HTTPURLResponse
+                if (200..<300).contains(http.statusCode) {
+                    return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+                }
+                let body = String(decoding: data, as: UTF8.self)
+                if retryable.contains(http.statusCode), attempt < 2 {
+                    let headerDelay = http.value(
+                        forHTTPHeaderField: "Retry-After"
+                    ).flatMap(TimeInterval.init)
+                    try await Task.sleep(for: .seconds(
+                        min(max(headerDelay ?? retryDelay(from: data) ?? defaultDelays[attempt], 1), 300)
+                    ))
+                    continue
+                }
+                throw ZoomAPIError(
+                    service: service,
+                    statusCode: http.statusCode,
+                    responseBody: body
+                )
+            } catch let error as ZoomAPIError {
+                throw error
+            } catch where attempt < 2 {
+                try await Task.sleep(for: .seconds(defaultDelays[attempt]))
+            }
+        }
+        throw URLError(.cannotConnectToHost)
+    }
+
+    public static func writeScribeBody(
+        audioURL: URL,
+        mimeType: String,
+        language: String,
+        to outputURL: URL
+    ) throws {
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        let output = try FileHandle(forWritingTo: outputURL)
+        let input = try FileHandle(forReadingFrom: audioURL)
+        defer {
+            try? input.close()
+            try? output.close()
+        }
+        try output.write(contentsOf: Data(#"{"file":"data:\#(mimeType);base64,"#.utf8))
+        let chunkSize = 48 * 1024
+        while let chunk = try input.read(upToCount: chunkSize), !chunk.isEmpty {
+            try Task.checkCancellation()
+            try output.write(contentsOf: chunk.base64EncodedData())
+        }
+        let config = try JSONSerialization.data(withJSONObject: [
+            "language": language,
+            "channel_separation": false
+        ], options: [.sortedKeys])
+        try output.write(contentsOf: Data(#"","config":"#.utf8))
+        try output.write(contentsOf: config)
+        try output.write(contentsOf: Data("}".utf8))
+    }
+
     private func retryDelay(from data: Data) -> TimeInterval? {
         let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let metadata = root?["metadata"] as? [String: Any]
@@ -318,9 +398,94 @@ public final class ZoomAIClient {
         return chunks
     }
 
-    private func normalizeSummary(_ text: String) -> String {
-        text.replacingOccurrences(of: "\r\n", with: "\n")
+    public static func normalizeSummaryText(_ text: String) -> String {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return text
+        }
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+        guard let summaryStart = lines.firstIndex(where: {
+            matches($0, pattern: #"^\s*#\s+Summary\s*$"#)
+        }) else {
+            return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let summaryEnd = lines[(summaryStart + 1)...].firstIndex(where: {
+            matches($0, pattern: #"^\s*#\s+\S"#)
+        }) ?? lines.endIndex
+        let sectionStarts = (summaryStart + 1..<summaryEnd).filter {
+            matches(lines[$0], pattern: #"^\s*#{2,}\s+\S"#)
+        }
+        guard sectionStarts.count >= 2 else {
+            return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var sections: [(heading: String, body: String)] = []
+        for (position, start) in sectionStarts.enumerated() {
+            let end = position + 1 < sectionStarts.count
+                ? sectionStarts[position + 1] : summaryEnd
+            let heading = lines[start].trimmingCharacters(in: .whitespacesAndNewlines)
+            let body = lines[(start + 1)..<end].joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !body.isEmpty else { continue }
+            if let duplicate = sections.firstIndex(where: {
+                normalizeHeading($0.heading) == normalizeHeading(heading) ||
+                    wordSimilarity($0.body, body) >= 0.70
+            }) {
+                if body.count > sections[duplicate].body.count {
+                    sections[duplicate] = (heading, body)
+                }
+            } else {
+                sections.append((heading, body))
+            }
+        }
+        guard !sections.isEmpty else {
+            return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var rebuilt = Array(lines.prefix(summaryStart + 1))
+        rebuilt.append("")
+        for section in sections {
+            rebuilt += [section.heading, section.body, ""]
+        }
+        rebuilt += lines.suffix(from: summaryEnd)
+        return rebuilt.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func matches(_ text: String, pattern: String) -> Bool {
+        text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    private static func normalizeHeading(_ heading: String) -> String {
+        heading.lowercased()
+            .replacingOccurrences(
+                of: #"[^\p{L}\p{N}]+"#,
+                with: " ",
+                options: .regularExpression
+            )
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func wordSimilarity(_ first: String, _ second: String) -> Double {
+        let firstWords = words(first)
+        let secondWords = words(second)
+        guard !firstWords.isEmpty, !secondWords.isEmpty else { return 0 }
+        let union = firstWords.union(secondWords)
+        return union.isEmpty
+            ? 0
+            : Double(firstWords.intersection(secondWords).count) / Double(union.count)
+    }
+
+    private static func words(_ text: String) -> Set<String> {
+        guard let regex = try? NSRegularExpression(pattern: #"[\p{L}\p{N}]{3,}"#) else {
+            return []
+        }
+        let lower = text.lowercased()
+        let ns = lower as NSString
+        return Set(regex.matches(
+            in: lower,
+            range: NSRange(location: 0, length: ns.length)
+        ).map { ns.substring(with: $0.range) })
     }
 
     private func flatten(_ text: String) -> String {

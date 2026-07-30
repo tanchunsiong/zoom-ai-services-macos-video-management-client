@@ -14,9 +14,15 @@ Scribe, Translator, and Summarizer. This is the macOS counterpart to
 - Optional Zoom Summarizer output for each job.
 - FFmpeg/FFprobe audio extraction with stream copy for compatible AAC, ALAC, and MP3 audio.
 - 15-minute audio segmentation by default with two concurrent Scribe calls.
+- Adaptive HTTP 413 and 503 recovery using progressively smaller uploads and segments.
+- Existing sidecars are reused independently so interrupted jobs resume only missing work.
 - Source-named VTT, translated VTT, transcript JSON, and summary Markdown sidecars.
-- Native AVKit playback, caption timeline seeking, playback speed control, and summary review.
-- Per-job and queue cost estimates for Scribe, Translator, and Summarizer.
+- Native AVKit playback with cached FFmpeg compatibility conversion, caption seeking,
+  playback speed control, and summary review.
+- Per-job and queue estimated/actual costs and processing times; time estimates learn
+  from completed jobs in the current queue.
+- Summary normalization removes overlapping duplicate subsections, with explicit reruns.
+- Recursive folder import, duplicate jobs, retry-all, and active-job auto-follow.
 - Zoom credentials stored in macOS Keychain. Secrets are never written to queue or settings files.
 
 ## Requirements
