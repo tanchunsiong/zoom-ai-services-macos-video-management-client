@@ -7,6 +7,8 @@ struct CoreChecks {
         try webVTTRoundTrip()
         translationRoutingBridgesThroughEnglish()
         try jwtContainsExpectedClaims()
+        try livePCMFramesAndLevels()
+        try liveSessionContractAndEvents()
         try await scribeRequestMatchesContract()
         try streamedScribeBodyRoundTripsMultipleChunks()
         try await queueSearchCoversAllArtifactsAndInvalidatesCache()
@@ -56,6 +58,111 @@ struct CoreChecks {
         try expect(claims["iss"] as? String == "key", "JWT issuer")
         try expect(claims["iat"] as? Int == 1_699_999_970, "JWT issued-at")
         try expect(claims["exp"] as? Int == 1_700_003_570, "JWT expiry")
+    }
+
+    static func livePCMFramesAndLevels() throws {
+        var assembler = PCM16FrameAssembler(frameBytes: 8)
+        try expect(assembler.append(Data([0, 1, 2, 3, 4, 5])).isEmpty, "Live partial frame")
+        let frames = assembler.append(Data([6, 7, 8, 9, 10, 11]))
+        try expect(
+            frames == [Data([0, 1, 2, 3, 4, 5, 6, 7])],
+            "Live exact PCM frame"
+        )
+        try expect(
+            assembler.drain() == Data([8, 9, 10, 11]),
+            "Live PCM remainder"
+        )
+
+        var halfScale = Data()
+        for _ in 0..<160 {
+            var sample = Int16(16_384).littleEndian
+            withUnsafeBytes(of: &sample) { halfScale.append(contentsOf: $0) }
+        }
+        let reading = PCM16AudioProcessor().process(
+            &halfScale,
+            automaticGain: false
+        )
+        try expect(abs(reading.peakDBFS - -6.0206) < 0.01, "Live peak dBFS")
+        try expect(abs(reading.rmsDBFS - -6.0206) < 0.01, "Live RMS dBFS")
+        try expect(!reading.isClipping, "Live non-clipping input")
+
+        var quiet = Data()
+        for _ in 0..<160 {
+            var sample = Int16(500).littleEndian
+            withUnsafeBytes(of: &sample) { quiet.append(contentsOf: $0) }
+        }
+        let gainReading = PCM16AudioProcessor().process(&quiet, automaticGain: true)
+        let amplified = quiet.withUnsafeBytes {
+            Int16(littleEndian: $0.loadUnaligned(as: Int16.self))
+        }
+        try expect(gainReading.appliedGain > 1 && amplified > 500, "Live automatic gain")
+        try expect(
+            PCM16AudioProcessor.normalizedMeter(-30) == 0.5,
+            "Live normalized meter"
+        )
+    }
+
+    static func liveSessionContractAndEvents() throws {
+        let options = LiveScribeOptions(
+            language: "ja-JP",
+            vadThreshold: 0.45,
+            prefixPaddingMilliseconds: 250,
+            silenceDurationMilliseconds: 400,
+            minimumPauseMilliseconds: 150,
+            forcedCaptionIntervalMilliseconds: 3_000
+        )
+        let data = Data(try ZoomLiveScribeClient.sessionUpdateJSON(options).utf8)
+        let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let vad = root?["turn_detection"] as? [String: Any]
+        try expect(root?["type"] as? String == "session.update", "Live session type")
+        try expect(root?["input_audio_format"] as? String == "pcm16", "Live PCM format")
+        try expect(root?["language"] as? String == "ja-JP", "Live language")
+        try expect(vad?["threshold"] as? Double == 0.45, "Live VAD threshold")
+        try expect(vad?["silence_duration_ms"] as? Int == 400, "Live VAD silence")
+
+        do {
+            try LiveScribeOptions(
+                language: "en-US",
+                silenceDurationMilliseconds: 150
+            ).validate()
+            throw CheckFailure("Live unstable VAD rejection")
+        } catch let error as CheckFailure {
+            throw error
+        } catch {
+            try expect(error.localizedDescription.contains("250"), "Live VAD validation")
+        }
+
+        try LiveScribeOptions(
+            language: "en-US",
+            forcedCaptionIntervalMilliseconds: 500
+        ).validate()
+        do {
+            try LiveScribeOptions(
+                language: "en-US",
+                forcedCaptionIntervalMilliseconds: 250
+            ).validate()
+            throw CheckFailure("Live cadence rejection")
+        } catch let error as CheckFailure {
+            throw error
+        } catch {
+        }
+
+        let completed = try ZoomLiveScribeClient.parseServerEvent(
+            #"{"type":"transcription.completed","transcript":"Hello live"}"#
+        )
+        let delta = try ZoomLiveScribeClient.parseServerEvent(
+            #"{"type":"transcription.delta","data":{"delta":"words in progress "}}"#
+        )
+        let error = try ZoomLiveScribeClient.parseServerEvent(
+            #"{"type":"error","error":{"message":"Invalid session"}}"#
+        )
+        try expect(completed.transcript == "Hello live", "Live completed transcript")
+        try expect(delta.transcript == "words in progress " && delta.isDelta, "Live delta")
+        try expect(error.error == "Invalid session", "Live structured error")
+        try expect(
+            LiveVADSettings.microphone != LiveVADSettings.systemAudio,
+            "Live source-specific VAD profiles"
+        )
     }
 
     static func audioProfilesMatchZoomCompatibleContainers() {

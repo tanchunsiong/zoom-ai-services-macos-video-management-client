@@ -9,6 +9,9 @@ Scribe, Translator, and Summarizer. This is the macOS counterpart to
 - Persistent drag-and-drop media queue with progress, cancellation, retry, and removal.
 - Case-insensitive queue search across filenames, original and translated captions,
   transcript JSON, and summary sidecars, composed with media-status filters.
+- Live microphone or Mac system-audio transcription over Zoom Scribe's authenticated
+  WebSocket endpoint, with an input meter, auto gain, configurable VAD, interim words,
+  and completed speech turns.
 - English, Simplified Chinese, Japanese, Spanish, and Italian transcription.
 - Optional cue-preserving translation, including non-English routes bridged through English.
 - Optional Zoom Summarizer output for each job.
@@ -48,6 +51,15 @@ swift run ZScribeMac
 
 Open Settings and save the Zoom Build credentials before starting the queue.
 
+For Live transcription, open Live, choose Microphone or System Audio, select the
+language, and start the session. macOS requests Microphone permission for microphone
+capture and Screen and System Audio Recording permission for the system mix. Live PCM
+and transcripts remain in memory unless the transcript is explicitly copied.
+
+The two sources retain separate VAD profiles. System Audio defaults to a forced
+three-second output cadence for continuous playback; this can be disabled or changed.
+Stopping drains buffered frames and waits for Zoom to finalize the last speech turn.
+
 ## Build an app bundle
 
 ```bash
@@ -84,8 +96,8 @@ removed after success, failure, or cancellation.
 The Swift package has two targets:
 
 - `ZScribeCore`: models, persistence, Keychain, FFmpeg orchestration, WebVTT,
-  JWT signing, Zoom HTTP clients, and the processing pipeline.
-- `ZScribeMac`: the native SwiftUI and AVKit application shell.
+  JWT signing, Zoom HTTP and Live WebSocket clients, and the processing pipeline.
+- `ZScribeMac`: the native SwiftUI, AVKit, AVAudioEngine, and ScreenCaptureKit shell.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for processing and security details.
 

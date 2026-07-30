@@ -13,12 +13,14 @@ final class AppModel: ObservableObject {
 
     enum Section: String, CaseIterable, Identifiable {
         case queue = "Queue"
+        case live = "Live"
         case review = "Review"
         case settings = "Settings"
         var id: Self { self }
         var symbol: String {
             switch self {
             case .queue: "list.bullet.rectangle"
+            case .live: "waveform.and.mic"
             case .review: "play.rectangle"
             case .settings: "gearshape"
             }
@@ -45,6 +47,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var queueSearchMatches: Set<UUID>?
     @Published private(set) var lastAddedCount: Int?
 
+    let live = LiveModeModel()
     let paths: AppPaths
     private let store: JSONStore
     private let vault = KeychainCredentialStore()

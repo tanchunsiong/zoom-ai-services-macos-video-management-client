@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 @main
 struct ZScribeMacApp: App {
@@ -10,6 +11,11 @@ struct ZScribeMacApp: App {
                 .environmentObject(model)
                 .frame(minWidth: 980, minHeight: 640)
                 .task { await model.initialize() }
+                .onReceive(NotificationCenter.default.publisher(
+                    for: NSApplication.willTerminateNotification
+                )) { _ in
+                    model.live.abort()
+                }
         }
         .defaultSize(width: 1240, height: 780)
         .commands {
@@ -20,6 +26,12 @@ struct ZScribeMacApp: App {
                     model.startQueue()
                 }
                 .keyboardShortcut(.return, modifiers: [.command])
+            }
+            CommandMenu("Live") {
+                Button("Show Live Transcription") {
+                    model.selectedSection = .live
+                }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
             }
         }
     }

@@ -37,6 +37,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Z Scribe uses the microphone for live transcription.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Z Scribe uses Screen and System Audio Recording access to transcribe the Mac audio mix.</string>
 </dict>
 </plist>
 PLIST

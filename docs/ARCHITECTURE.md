@@ -4,6 +4,10 @@
 SwiftUI shell
   |-- macOS Keychain
   |-- AVKit playback and cue timeline
+  |-- Live transcription
+  |    |-- AVAudioEngine default microphone capture
+  |    |-- ScreenCaptureKit system-audio capture
+  |    `-- Zoom Scribe Live WebSocket
   `-- MediaPipeline
        |-- JSON queue and settings stores
        |-- ffprobe metadata
@@ -39,6 +43,14 @@ server-side validation.
 
 HTTP errors include only a bounded response excerpt. Authentication headers and
 credentials are never included in application status or persisted events.
+
+Live input is converted in memory to little-endian 16 kHz mono PCM16 and assembled
+into approximately 100 ms frames. The client authenticates directly to
+`wss://api.zoom.us/v2/aiservices/scribe/live` with the `live-asr` subprotocol, waits
+for `session.updated`, then streams binary audio frames. Stop drains the frame stream,
+sends `session.close`, and waits for final events. Live audio and transcript events
+are not written to disk. ScreenCaptureKit excludes this app's own audio from system
+capture.
 
 ## Failure and recovery
 

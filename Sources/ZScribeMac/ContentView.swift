@@ -30,12 +30,15 @@ struct ContentView: View {
             Group {
                 switch model.selectedSection ?? .queue {
                 case .queue: QueueView()
+                case .live: LiveView(model: model.live)
                 case .review: ReviewView()
                 case .settings: SettingsView()
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                statusBar
+                if model.selectedSection != .live {
+                    statusBar
+                }
             }
         }
         .alert("Z Scribe", isPresented: Binding(
