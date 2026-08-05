@@ -10,8 +10,8 @@ Scribe, Translator, and Summarizer. This is the macOS counterpart to
 - Case-insensitive queue search across filenames, original and translated captions,
   transcript JSON, and summary sidecars, composed with media-status filters.
 - Live microphone or Mac system-audio transcription over Zoom Scribe's authenticated
-  WebSocket endpoint, with an input meter, auto gain, configurable VAD, interim words,
-  and completed speech turns.
+  WebSocket endpoint, with an input meter, auto gain, per-session vocabulary JSON,
+  interim words, and completed speech turns.
 - English, Simplified Chinese, Japanese, Spanish, and Italian transcription.
 - Optional cue-preserving translation, including non-English routes bridged through English.
 - Optional Zoom Summarizer output for each job.
@@ -56,9 +56,13 @@ language, and start the session. macOS requests Microphone permission for microp
 capture and Screen and System Audio Recording permission for the system mix. Live PCM
 and transcripts remain in memory unless the transcript is explicitly copied.
 
-The two sources retain separate VAD profiles. System Audio defaults to a forced
-three-second output cadence for continuous playback; this can be disabled or changed.
-Stopping drains buffered frames and waits for Zoom to finalize the last speech turn.
+The optional vocabulary editor accepts a vocabulary object, a top-level `vocabulary`
+object, or a full ASR payload containing `config.vocabulary`. The app validates phrases,
+pronunciations, and aliases locally, remembers the JSON between launches, and sends only
+the vocabulary object in the Live session configuration. System Audio defaults to a
+forced three-second output cadence for continuous playback; this can be disabled or
+changed. Stopping drains buffered frames and waits for Zoom to finalize the last speech
+turn.
 
 ## Build an app bundle
 

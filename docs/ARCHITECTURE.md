@@ -50,7 +50,10 @@ into approximately 100 ms frames. The client authenticates directly to
 for `session.updated`, then streams binary audio frames. Stop drains the frame stream,
 sends `session.close`, and waits for final events. Live audio and transcript events
 are not written to disk. ScreenCaptureKit excludes this app's own audio from system
-capture.
+capture. The Live session update contains `language` and, when supplied, a validated
+`vocabulary` object. The editor also accepts a complete ASR request envelope, but
+extracts only `config.vocabulary`; batch-only config fields and top-level `reference_id`
+are not forwarded to the Live session.
 
 ## Failure and recovery
 

@@ -103,33 +103,61 @@ struct CoreChecks {
     }
 
     static func liveSessionContractAndEvents() throws {
+        let vocabularyJSON = #"""
+        {
+          "phrases": ["AIAGW", "Zoom AI Companion"],
+          "pronunciations": [
+            {"phrase": "AIAGW", "pronunciation": "A I A gateway"}
+          ],
+          "aliases": [
+            {"canonical": "Zoom AI Companion", "variants": ["AI Companion"]}
+          ]
+        }
+        """#
         let options = LiveScribeOptions(
             language: "ja-JP",
-            vadThreshold: 0.45,
-            prefixPaddingMilliseconds: 250,
-            silenceDurationMilliseconds: 400,
-            minimumPauseMilliseconds: 150,
+            vocabularyJSON: vocabularyJSON,
             forcedCaptionIntervalMilliseconds: 3_000
         )
         let data = Data(try ZoomLiveScribeClient.sessionUpdateJSON(options).utf8)
         let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let vad = root?["turn_detection"] as? [String: Any]
+        let vocabulary = root?["vocabulary"] as? [String: Any]
         try expect(root?["type"] as? String == "session.update", "Live session type")
         try expect(root?["input_audio_format"] as? String == "pcm16", "Live PCM format")
         try expect(root?["language"] as? String == "ja-JP", "Live language")
-        try expect(vad?["threshold"] as? Double == 0.45, "Live VAD threshold")
-        try expect(vad?["silence_duration_ms"] as? Int == 400, "Live VAD silence")
+        try expect(root?["turn_detection"] == nil, "Live VAD configuration omitted")
+        try expect(
+            vocabulary?["phrases"] as? [String] == ["AIAGW", "Zoom AI Companion"],
+            "Live vocabulary phrases"
+        )
 
+        let fullConfig = #"""
+        {
+          "config": {
+            "language": "en-US",
+            "vocabulary": {"phrases": ["ServiceNow"]}
+          },
+          "reference_id": "customer-request-123"
+        }
+        """#
+        let extracted = try ScribeVocabularyJSON.parse(fullConfig)
+        try expect(
+            extracted?["phrases"] as? [String] == ["ServiceNow"],
+            "Live full config vocabulary extraction"
+        )
         do {
             try LiveScribeOptions(
                 language: "en-US",
-                silenceDurationMilliseconds: 150
+                vocabularyJSON: #"{"phrases":"AIAGW"}"#
             ).validate()
-            throw CheckFailure("Live unstable VAD rejection")
+            throw CheckFailure("Live invalid vocabulary rejection")
         } catch let error as CheckFailure {
             throw error
         } catch {
-            try expect(error.localizedDescription.contains("250"), "Live VAD validation")
+            try expect(
+                error.localizedDescription.contains("array of strings"),
+                "Live vocabulary validation"
+            )
         }
 
         try LiveScribeOptions(
@@ -159,10 +187,6 @@ struct CoreChecks {
         try expect(completed.transcript == "Hello live", "Live completed transcript")
         try expect(delta.transcript == "words in progress " && delta.isDelta, "Live delta")
         try expect(error.error == "Invalid session", "Live structured error")
-        try expect(
-            LiveVADSettings.microphone != LiveVADSettings.systemAudio,
-            "Live source-specific VAD profiles"
-        )
     }
 
     static func audioProfilesMatchZoomCompatibleContainers() {

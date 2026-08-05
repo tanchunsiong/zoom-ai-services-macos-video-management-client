@@ -74,17 +74,14 @@ public final class ZoomLiveScribeClient {
 
     public static func sessionUpdateJSON(_ options: LiveScribeOptions) throws -> String {
         try options.validate()
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "type": "session.update",
             "input_audio_format": "pcm16",
-            "language": options.language,
-            "turn_detection": [
-                "threshold": options.vadThreshold,
-                "prefix_padding_ms": options.prefixPaddingMilliseconds,
-                "silence_duration_ms": options.silenceDurationMilliseconds,
-                "min_pause_duration_ms": options.minimumPauseMilliseconds
-            ]
+            "language": options.language
         ]
+        if let vocabulary = try ScribeVocabularyJSON.parse(options.vocabularyJSON) {
+            payload["vocabulary"] = vocabulary
+        }
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
     }
@@ -152,10 +149,7 @@ public final class ZoomLiveScribeClient {
         over socket: URLSessionWebSocketTask
     ) async throws {
         var lastForcedTurn = ContinuousClock.now
-        let forcedFrameCount = max(
-            3,
-            Int(ceil(Double(options.silenceDurationMilliseconds + 50) / 100))
-        )
+        let forcedFrameCount = 4
         for await frame in frames {
             try Task.checkCancellation()
             guard !frame.isEmpty else { continue }

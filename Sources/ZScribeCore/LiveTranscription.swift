@@ -1,59 +1,17 @@
 import Foundation
 
-public struct LiveVADSettings: Hashable, Sendable {
-    public var threshold: Double
-    public var prefixPaddingMilliseconds: Int
-    public var silenceDurationMilliseconds: Int
-    public var minimumPauseMilliseconds: Int
-
-    public init(
-        threshold: Double,
-        prefixPaddingMilliseconds: Int,
-        silenceDurationMilliseconds: Int,
-        minimumPauseMilliseconds: Int
-    ) {
-        self.threshold = threshold
-        self.prefixPaddingMilliseconds = prefixPaddingMilliseconds
-        self.silenceDurationMilliseconds = silenceDurationMilliseconds
-        self.minimumPauseMilliseconds = minimumPauseMilliseconds
-    }
-
-    public static let microphone = LiveVADSettings(
-        threshold: 0.5,
-        prefixPaddingMilliseconds: 300,
-        silenceDurationMilliseconds: 350,
-        minimumPauseMilliseconds: 100
-    )
-
-    public static let systemAudio = LiveVADSettings(
-        threshold: 0.45,
-        prefixPaddingMilliseconds: 300,
-        silenceDurationMilliseconds: 250,
-        minimumPauseMilliseconds: 50
-    )
-}
-
 public struct LiveScribeOptions: Hashable, Sendable {
     public var language: String
-    public var vadThreshold: Double
-    public var prefixPaddingMilliseconds: Int
-    public var silenceDurationMilliseconds: Int
-    public var minimumPauseMilliseconds: Int
+    public var vocabularyJSON: String
     public var forcedCaptionIntervalMilliseconds: Int
 
     public init(
         language: String,
-        vadThreshold: Double = 0.5,
-        prefixPaddingMilliseconds: Int = 300,
-        silenceDurationMilliseconds: Int = 350,
-        minimumPauseMilliseconds: Int = 100,
+        vocabularyJSON: String = "",
         forcedCaptionIntervalMilliseconds: Int = 0
     ) {
         self.language = language
-        self.vadThreshold = vadThreshold
-        self.prefixPaddingMilliseconds = prefixPaddingMilliseconds
-        self.silenceDurationMilliseconds = silenceDurationMilliseconds
-        self.minimumPauseMilliseconds = minimumPauseMilliseconds
+        self.vocabularyJSON = vocabularyJSON
         self.forcedCaptionIntervalMilliseconds = forcedCaptionIntervalMilliseconds
     }
 
@@ -61,18 +19,7 @@ public struct LiveScribeOptions: Hashable, Sendable {
         guard !language.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw validationError("A transcription language is required.")
         }
-        guard (0...1).contains(vadThreshold) else {
-            throw validationError("VAD threshold must be between 0 and 1.")
-        }
-        guard (0...5_000).contains(prefixPaddingMilliseconds) else {
-            throw validationError("Prefix padding must be between 0 and 5,000 ms.")
-        }
-        guard (250...10_000).contains(silenceDurationMilliseconds) else {
-            throw validationError("Silence duration must be between 250 and 10,000 ms.")
-        }
-        guard (0...5_000).contains(minimumPauseMilliseconds) else {
-            throw validationError("Minimum pause must be between 0 and 5,000 ms.")
-        }
+        _ = try ScribeVocabularyJSON.parse(vocabularyJSON)
         guard forcedCaptionIntervalMilliseconds == 0 ||
             (500...15_000).contains(forcedCaptionIntervalMilliseconds) else {
             throw validationError(
@@ -84,6 +31,74 @@ public struct LiveScribeOptions: Hashable, Sendable {
     private func validationError(_ message: String) -> NSError {
         NSError(
             domain: "ZScribe.Live.Options",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+}
+
+public enum ScribeVocabularyJSON {
+    public static func parse(_ json: String) throws -> [String: Any]? {
+        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let value: Any
+        do {
+            value = try JSONSerialization.jsonObject(with: Data(trimmed.utf8))
+        } catch {
+            throw vocabularyError("Vocabulary must be valid JSON: \(error.localizedDescription)")
+        }
+        guard let root = value as? [String: Any] else {
+            throw vocabularyError("Vocabulary JSON must contain an object.")
+        }
+
+        let vocabulary: [String: Any]
+        if let config = root["config"] as? [String: Any] {
+            guard let nested = config["vocabulary"] as? [String: Any] else {
+                throw vocabularyError("The config object does not contain a vocabulary object.")
+            }
+            vocabulary = nested
+        } else if root.keys.contains("vocabulary") {
+            guard let nested = root["vocabulary"] as? [String: Any] else {
+                throw vocabularyError("The vocabulary field must contain an object.")
+            }
+            vocabulary = nested
+        } else {
+            vocabulary = root
+        }
+
+        if let phrases = vocabulary["phrases"] {
+            guard let values = phrases as? [Any], values.allSatisfy({ $0 is String }) else {
+                throw vocabularyError("phrases must be an array of strings.")
+            }
+        }
+        if let pronunciations = vocabulary["pronunciations"] {
+            guard let values = pronunciations as? [[String: Any]], values.allSatisfy({ entry in
+                entry["phrase"] is String && entry["pronunciation"] is String
+            }) else {
+                throw vocabularyError(
+                    "pronunciations must contain phrase and pronunciation strings."
+                )
+            }
+        }
+        if let aliases = vocabulary["aliases"] {
+            guard let values = aliases as? [[String: Any]], values.allSatisfy({ entry in
+                guard entry["canonical"] is String,
+                      let variants = entry["variants"] as? [Any]
+                else { return false }
+                return variants.allSatisfy { $0 is String }
+            }) else {
+                throw vocabularyError(
+                    "aliases must contain a canonical string and an array of variant strings."
+                )
+            }
+        }
+        return vocabulary
+    }
+
+    private static func vocabularyError(_ message: String) -> NSError {
+        NSError(
+            domain: "ZScribe.Live.Vocabulary",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: message]
         )

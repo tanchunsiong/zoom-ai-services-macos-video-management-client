@@ -25,13 +25,13 @@ enum AudioMeterState {
 final class LiveModeModel: ObservableObject {
     @Published private(set) var source: LiveAudioSource = .microphone
     @Published var language = "en-US"
-    @Published var vadThreshold = LiveVADSettings.microphone.threshold
-    @Published var prefixPaddingMilliseconds =
-        LiveVADSettings.microphone.prefixPaddingMilliseconds
-    @Published var silenceDurationMilliseconds =
-        LiveVADSettings.microphone.silenceDurationMilliseconds
-    @Published var minimumPauseMilliseconds =
-        LiveVADSettings.microphone.minimumPauseMilliseconds
+    @Published var vocabularyJSON = UserDefaults.standard.string(
+        forKey: "liveVocabularyJSON"
+    ) ?? "" {
+        didSet {
+            UserDefaults.standard.set(vocabularyJSON, forKey: "liveVocabularyJSON")
+        }
+    }
     @Published var automaticGain = false
     @Published var forceCaptionCadence = false
     @Published var cadence = CaptionCadence.all.first {
@@ -52,14 +52,12 @@ final class LiveModeModel: ObservableObject {
     private let client = ZoomLiveScribeClient()
     private var capture: LiveAudioCapture?
     private var sessionTask: Task<Void, Never>?
-    private var microphoneVAD = LiveVADSettings.microphone
-    private var systemAudioVAD = LiveVADSettings.systemAudio
     private var microphoneCadenceEnabled = false
     private var systemAudioCadenceEnabled = true
     private var clipHoldUntil = Date.distantPast
 
     var isSessionActive: Bool { isConnecting || isStreaming || isStopping }
-    var canStart: Bool { !isSessionActive }
+    var canStart: Bool { !isSessionActive && vocabularyError == nil }
     var canStop: Bool { (isConnecting || isStreaming) && !isStopping }
     var transcriptText: String { segments.map(\.text).joined(separator: "\n") }
     var segmentCountLabel: String {
@@ -75,13 +73,26 @@ final class LiveModeModel: ObservableObject {
             ? interimTranscript
             : "..." + interimTranscript.suffix(320)
     }
+    var vocabularyError: String? {
+        do {
+            _ = try ScribeVocabularyJSON.parse(vocabularyJSON)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+    var hasVocabulary: Bool {
+        !vocabularyJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     func setSource(_ newSource: LiveAudioSource) {
         guard !isSessionActive, source != newSource else { return }
-        saveCurrentProfile()
+        if source == .microphone {
+            microphoneCadenceEnabled = forceCaptionCadence
+        } else {
+            systemAudioCadenceEnabled = forceCaptionCadence
+        }
         source = newSource
-        let profile = newSource == .microphone ? microphoneVAD : systemAudioVAD
-        apply(profile)
         forceCaptionCadence = newSource == .microphone
             ? microphoneCadenceEnabled
             : systemAudioCadenceEnabled
@@ -135,10 +146,7 @@ final class LiveModeModel: ObservableObject {
             }
             let options = LiveScribeOptions(
                 language: language,
-                vadThreshold: vadThreshold,
-                prefixPaddingMilliseconds: prefixPaddingMilliseconds,
-                silenceDurationMilliseconds: silenceDurationMilliseconds,
-                minimumPauseMilliseconds: minimumPauseMilliseconds,
+                vocabularyJSON: vocabularyJSON,
                 forcedCaptionIntervalMilliseconds:
                     forceCaptionCadence ? cadence.milliseconds : 0
             )
@@ -248,29 +256,6 @@ final class LiveModeModel: ObservableObject {
         inputLevel = 0
         inputLevelLabel = "-- dBFS"
         inputLevelState = .normal
-    }
-
-    private func saveCurrentProfile() {
-        let settings = LiveVADSettings(
-            threshold: vadThreshold,
-            prefixPaddingMilliseconds: prefixPaddingMilliseconds,
-            silenceDurationMilliseconds: silenceDurationMilliseconds,
-            minimumPauseMilliseconds: minimumPauseMilliseconds
-        )
-        if source == .microphone {
-            microphoneVAD = settings
-            microphoneCadenceEnabled = forceCaptionCadence
-        } else {
-            systemAudioVAD = settings
-            systemAudioCadenceEnabled = forceCaptionCadence
-        }
-    }
-
-    private func apply(_ settings: LiveVADSettings) {
-        vadThreshold = settings.threshold
-        prefixPaddingMilliseconds = settings.prefixPaddingMilliseconds
-        silenceDurationMilliseconds = settings.silenceDurationMilliseconds
-        minimumPauseMilliseconds = settings.minimumPauseMilliseconds
     }
 
     private func liveError(_ message: String) -> NSError {

@@ -67,35 +67,7 @@ struct LiveView: View {
                     .disabled(model.isSessionActive)
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    sectionLabel("Voice Activity")
-                    valueSlider(
-                        "Threshold",
-                        value: binding(\.vadThreshold),
-                        range: 0...1,
-                        step: 0.05,
-                        valueLabel: String(format: "%.2f", model.vadThreshold)
-                    )
-                    integerStepper(
-                        "Prefix padding",
-                        value: binding(\.prefixPaddingMilliseconds),
-                        range: 0...5_000,
-                        step: 50
-                    )
-                    integerStepper(
-                        "Silence ends turn",
-                        value: binding(\.silenceDurationMilliseconds),
-                        range: 250...10_000,
-                        step: 50
-                    )
-                    integerStepper(
-                        "Minimum pause",
-                        value: binding(\.minimumPauseMilliseconds),
-                        range: 0...5_000,
-                        step: 50
-                    )
-                }
-                .disabled(model.isSessionActive)
+                vocabularyEditor
 
                 VStack(alignment: .leading, spacing: 10) {
                     sectionLabel("Signal")
@@ -125,7 +97,7 @@ struct LiveView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .tint(model.canStop ? .red : .accentColor)
-                .disabled(model.isStopping)
+                .disabled(model.isStopping || (!model.canStop && !model.canStart))
             }
             .padding(20)
         }
@@ -237,37 +209,46 @@ struct LiveView: View {
         )
     }
 
-    private func valueSlider(
-        _ title: String,
-        value: Binding<Double>,
-        range: ClosedRange<Double>,
-        step: Double,
-        valueLabel: String
-    ) -> some View {
-        VStack(spacing: 5) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text(valueLabel).monospacedDigit().foregroundStyle(.secondary)
+    private var vocabularyEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Scribe Vocabulary JSON")
+            ZStack(alignment: .topLeading) {
+                if model.vocabularyJSON.isEmpty {
+                    Text("{\n  \"phrases\": [\"AIAGW\"],\n  \"pronunciations\": [],\n  \"aliases\": []\n}")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: binding(\.vocabularyJSON))
+                    .font(.system(.caption, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(4)
             }
-            Slider(value: value, in: range, step: step)
-        }
-    }
+            .frame(height: 170)
+            .background(.background)
+            .overlay {
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(
+                        model.vocabularyError == nil
+                            ? Color.secondary.opacity(0.35)
+                            : Color.red,
+                        lineWidth: 1
+                    )
+            }
+            .disabled(model.isSessionActive)
 
-    private func integerStepper(
-        _ title: String,
-        value: Binding<Int>,
-        range: ClosedRange<Int>,
-        step: Int
-    ) -> some View {
-        Stepper(value: value, in: range, step: step) {
             HStack {
-                Text(title)
-                Spacer()
-                Text("\(value.wrappedValue) ms")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                Image(systemName: model.vocabularyError == nil
+                      ? (model.hasVocabulary ? "checkmark.circle" : "info.circle")
+                      : "exclamationmark.triangle")
+                Text(model.vocabularyError
+                     ?? (model.hasVocabulary ? "Valid vocabulary JSON" : "Optional"))
+                    .lineLimit(2)
             }
+            .font(.caption)
+            .foregroundStyle(model.vocabularyError == nil ? Color.secondary : Color.red)
         }
     }
 
