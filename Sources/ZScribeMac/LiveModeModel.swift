@@ -15,8 +15,8 @@ final class LiveModeModel: ObservableObject {
         let key = "liveVocabularyJSON"
         let sampleVersionKey = "liveVocabularySampleVersion"
         let saved = defaults.string(forKey: key)
-        if defaults.integer(forKey: sampleVersionKey) < 1 {
-            defaults.set(1, forKey: sampleVersionKey)
+        if defaults.integer(forKey: sampleVersionKey) < 2 {
+            defaults.set(2, forKey: sampleVersionKey)
             if saved?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
                 defaults.set(ScribeVocabularyJSON.sample, forKey: key)
                 return ScribeVocabularyJSON.sample
@@ -43,11 +43,15 @@ final class LiveModeModel: ObservableObject {
     @Published private(set) var interimTranscript = ""
     @Published private(set) var segments: [LiveTranscriptSegment] = []
 
-    private let vault = KeychainCredentialStore()
+    private let credentialStore: FileCredentialStore
     private let client = ZoomLiveScribeClient()
     private var capture: LiveAudioCapture?
     private var sessionTask: Task<Void, Never>?
     private var clipHoldUntil = Date.distantPast
+
+    init(credentialStore: FileCredentialStore) {
+        self.credentialStore = credentialStore
+    }
 
     var isSessionActive: Bool { isConnecting || isStreaming || isStopping }
     var canStart: Bool { !isSessionActive && vocabularyError == nil }
@@ -126,7 +130,7 @@ final class LiveModeModel: ObservableObject {
 
     private func runSession() async {
         do {
-            guard let credentials = try vault.load(), credentials.isComplete else {
+            guard let credentials = try credentialStore.load(), credentials.isComplete else {
                 throw liveError("Save Zoom Build credentials in Settings first.")
             }
             let options = LiveScribeOptions(

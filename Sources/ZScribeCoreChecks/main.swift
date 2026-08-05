@@ -7,6 +7,7 @@ struct CoreChecks {
         try webVTTRoundTrip()
         translationRoutingBridgesThroughEnglish()
         try jwtContainsExpectedClaims()
+        try localCredentialStoreRoundTrip()
         try livePCMFramesAndLevels()
         try liveSessionContractAndEvents()
         try await scribeRequestMatchesContract()
@@ -58,6 +59,28 @@ struct CoreChecks {
         try expect(claims["iss"] as? String == "key", "JWT issuer")
         try expect(claims["iat"] as? Int == 1_699_999_970, "JWT issued-at")
         try expect(claims["exp"] as? Int == 1_700_003_570, "JWT expiry")
+    }
+
+    static func localCredentialStoreRoundTrip() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zscribe-credentials-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = try AppPaths(root: root)
+        let store = FileCredentialStore(paths: paths)
+        let credentials = APICredentials(apiKey: "local-key", apiSecret: "local-secret")
+        try store.save(credentials)
+        let loaded = try store.load()
+        try expect(loaded == credentials, "Local credentials round trip")
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: paths.credentials.path
+        )
+        try expect(
+            (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
+            "Local credential permissions"
+        )
+        try store.clear()
+        let cleared = try store.load()
+        try expect(cleared == nil, "Local credentials removed")
     }
 
     static func livePCMFramesAndLevels() throws {
@@ -150,6 +173,17 @@ struct CoreChecks {
                 "AIAGW", "Zoom AI Companion", "ServiceNow"
             ],
             "Live default vocabulary sample"
+        )
+        let fenced = try ScribeVocabularyJSON.parse(
+            """
+            ```json
+            {“phrases”:[“ServiceNow”]}
+            ```
+            """
+        )
+        try expect(
+            fenced?["phrases"] as? [String] == ["ServiceNow"],
+            "Live fenced smart-quote vocabulary"
         )
         do {
             try LiveScribeOptions(

@@ -7,12 +7,13 @@ cd "$ROOT"
 swift build -c release
 BIN_DIR="$(swift build -c release --show-bin-path)"
 APP="$ROOT/ZScribeMac.app"
+BUNDLE_ID="com.tanchunsiong.ZScribeMac"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/ZScribeMac" "$APP/Contents/MacOS/ZScribeMac"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -22,10 +23,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key>
     <string>ZScribeMac</string>
     <key>CFBundleIdentifier</key>
-    <string>com.tanchunsiong.ZScribeMac</string>
+    <string>$BUNDLE_ID</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
+    <string>Z Scribe</string>
+    <key>CFBundleDisplayName</key>
     <string>Z Scribe</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
@@ -45,5 +48,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-codesign --force --sign - "$APP"
+codesign --force --sign - \
+    --identifier "$BUNDLE_ID" \
+    --requirements "=designated => identifier \"$BUNDLE_ID\"" \
+    "$APP"
 echo "Built $APP"

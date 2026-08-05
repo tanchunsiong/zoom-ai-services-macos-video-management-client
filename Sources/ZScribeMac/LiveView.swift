@@ -213,10 +213,7 @@ struct LiveView: View {
                         .padding(.vertical, 8)
                         .allowsHitTesting(false)
                 }
-                TextEditor(text: binding(\.vocabularyJSON))
-                    .font(.system(.caption, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(4)
+                JSONTextEditor(text: binding(\.vocabularyJSON))
             }
             .frame(height: 170)
             .background(.background)

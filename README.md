@@ -26,7 +26,7 @@ Scribe, Translator, and Summarizer. This is the macOS counterpart to
   from completed jobs in the current queue.
 - Summary normalization removes overlapping duplicate subsections, with explicit reruns.
 - Recursive folder import, duplicate jobs, retry-all, and active-job auto-follow.
-- Zoom credentials stored in macOS Keychain. Secrets are never written to queue or settings files.
+- Zoom credentials stored in a local, user-readable-only Application Support file.
 
 ## Requirements
 
@@ -70,8 +70,11 @@ scripts/package-app.sh
 open ZScribeMac.app
 ```
 
-The script creates an ad-hoc signed `ZScribeMac.app`. Distribution outside local
-development requires your Apple Developer signing identity and notarization.
+The script creates an ad-hoc signed `ZScribeMac.app` with the fixed bundle identifier
+`com.tanchunsiong.ZScribeMac` and a stable designated requirement so macOS permission
+grants survive local rebuilds. Run the packaged app, rather than `swift run`, when testing
+Microphone and Screen and System Audio Recording permissions. Distribution outside local
+development still requires your Apple Developer signing identity and notarization.
 
 ## Verify
 
@@ -89,16 +92,17 @@ Final files are written beside the source media:
 - `meeting.transcript.json`
 - `meeting.summary.md`
 
-Queue and non-secret settings are stored under
-`~/Library/Application Support/Z Scribe`. Temporary audio parts are deleted as
-soon as their Scribe requests complete, and the per-job work directory is
-removed after success, failure, or cancellation.
+Queue, settings, and `credentials.json` are stored under
+`~/Library/Application Support/Z Scribe`. The credential file contains the API key and
+secret as local JSON with POSIX mode `0600`; it is not stored in Keychain. Temporary audio
+parts are deleted as soon as their Scribe requests complete, and the per-job work
+directory is removed after success, failure, or cancellation.
 
 ## Architecture
 
 The Swift package has two targets:
 
-- `ZScribeCore`: models, persistence, Keychain, FFmpeg orchestration, WebVTT,
+- `ZScribeCore`: models, local persistence, FFmpeg orchestration, WebVTT,
   JWT signing, Zoom HTTP and Live WebSocket clients, and the processing pipeline.
 - `ZScribeMac`: the native SwiftUI, AVKit, AVAudioEngine, and ScreenCaptureKit shell.
 

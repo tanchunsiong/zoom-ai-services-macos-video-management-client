@@ -47,10 +47,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var queueSearchMatches: Set<UUID>?
     @Published private(set) var lastAddedCount: Int?
 
-    let live = LiveModeModel()
+    let live: LiveModeModel
     let paths: AppPaths
     private let store: JSONStore
-    private let vault = KeychainCredentialStore()
+    private let credentialStore: FileCredentialStore
     private let zoom = ZoomAIClient()
     private let pipeline: MediaPipeline
     private let queueSearchIndex = QueueSearchIndex()
@@ -64,6 +64,8 @@ final class AppModel: ObservableObject {
             fatalError("Could not create Application Support directory: \(error)")
         }
         store = JSONStore(paths: paths)
+        credentialStore = FileCredentialStore(paths: paths)
+        live = LiveModeModel(credentialStore: credentialStore)
         pipeline = MediaPipeline(paths: paths)
     }
 
@@ -154,7 +156,7 @@ final class AppModel: ObservableObject {
         do {
             settings = try store.loadSettings()
             jobs = try store.loadQueue().map(MediaPipeline.applyExistingOutputs)
-            if let credentials = try vault.load() {
+            if let credentials = try credentialStore.load() {
                 apiKey = credentials.apiKey
                 hasSavedSecret = !credentials.apiSecret.isEmpty
             }
@@ -341,17 +343,17 @@ final class AppModel: ObservableObject {
         do {
             settings.clamp()
             try store.saveSettings(settings)
-            let existingSecret = try vault.load()?.apiSecret ?? ""
+            let existingSecret = try credentialStore.load()?.apiSecret ?? ""
             let credentials = APICredentials(
                 apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
                 apiSecret: secret.isEmpty ? existingSecret : secret
             )
             if !credentials.apiKey.isEmpty || !credentials.apiSecret.isEmpty {
                 try zoom.validateLocally(credentials)
-                try vault.save(credentials)
+                try credentialStore.save(credentials)
                 hasSavedSecret = true
             }
-            notice = "Settings and Keychain credentials saved"
+            notice = "Settings and local credentials saved"
         } catch {
             show(error)
         }
@@ -359,10 +361,10 @@ final class AppModel: ObservableObject {
 
     func clearCredentials() {
         do {
-            try vault.clear()
+            try credentialStore.clear()
             apiKey = ""
             hasSavedSecret = false
-            notice = "Zoom credentials removed from Keychain"
+            notice = "Local Zoom credentials removed"
         } catch {
             show(error)
         }
@@ -377,7 +379,7 @@ final class AppModel: ObservableObject {
 
     private func run(jobIDs: [UUID]? = nil) async {
         do {
-            guard let credentials = try vault.load(), credentials.isComplete else {
+            guard let credentials = try credentialStore.load(), credentials.isComplete else {
                 selectedSection = .settings
                 throw NSError(domain: "ZScribe", code: 1,
                               userInfo: [NSLocalizedDescriptionKey:

@@ -10,7 +10,7 @@ struct SettingsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Settings").font(.title2.weight(.semibold))
-                    Text("Credentials are stored in your login Keychain.")
+                    Text("Credentials are stored in this Mac's Application Support folder.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -21,11 +21,14 @@ struct SettingsView: View {
             Form {
                 Section("Zoom Build Credentials") {
                     TextField("API key", text: $model.apiKey)
-                        .textContentType(.username)
+                        .textContentType(.none)
+                        .disableAutocorrection(true)
                     SecureField(
                         model.hasSavedSecret ? "API secret (saved)" : "API secret",
                         text: $apiSecret
                     )
+                    .textContentType(.none)
+                    .disableAutocorrection(true)
                     HStack {
                         Label(model.hasSavedSecret ? "Credential saved" : "No credential saved",
                               systemImage: model.hasSavedSecret ? "key.fill" : "key")

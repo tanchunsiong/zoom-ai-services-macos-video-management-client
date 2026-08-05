@@ -55,7 +55,7 @@ public enum ScribeVocabularyJSON {
     """
 
     public static func parse(_ json: String) throws -> [String: Any]? {
-        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = normalized(json)
         guard !trimmed.isEmpty else { return nil }
 
         let value: Any
@@ -118,6 +118,24 @@ public enum ScribeVocabularyJSON {
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: message]
         )
+    }
+
+    private static func normalized(_ json: String) -> String {
+        var value = json
+            .replacingOccurrences(of: "\u{FEFF}", with: "")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+            .replacingOccurrences(of: "\u{201C}", with: "\"")
+            .replacingOccurrences(of: "\u{201D}", with: "\"")
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("```") {
+            var lines = trimmed.components(separatedBy: .newlines)
+            if !lines.isEmpty { lines.removeFirst() }
+            if lines.last?.trimmingCharacters(in: .whitespacesAndNewlines) == "```" {
+                lines.removeLast()
+            }
+            value = lines.joined(separator: "\n")
+        }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

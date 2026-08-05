@@ -2,7 +2,7 @@
 
 ```text
 SwiftUI shell
-  |-- macOS Keychain
+  |-- local credential file (0600)
   |-- AVKit playback and cue timeline
   |-- Live transcription
   |    |-- AVAudioEngine default microphone capture
@@ -35,10 +35,11 @@ SwiftUI shell
 
 ## Security
 
-The Zoom API secret is stored as a generic password in macOS Keychain under
-service `com.tanchunsiong.ZScribeMac.ZoomBuildCredentials`. Queue and settings
-JSON never contain credentials. The app validates credentials locally by signing
-a one-hour HS256 Zoom Build JWT; the first service request is the authoritative
+The Zoom API key and secret are stored in
+`~/Library/Application Support/Z Scribe/credentials.json`, separately from queue and
+settings JSON. The file is restricted to the signed-in user with POSIX mode `0600` and
+is not read from or written to macOS Keychain. The app validates credentials locally by
+signing a one-hour HS256 Zoom Build JWT; the first service request is the authoritative
 server-side validation.
 
 HTTP errors include only a bounded response excerpt. Authentication headers and

@@ -1,10 +1,10 @@
 import Foundation
-import Security
 
 public struct AppPaths: Sendable {
     public let root: URL
     public let queue: URL
     public let settings: URL
+    public let credentials: URL
     public let work: URL
 
     public init(root: URL? = nil) throws {
@@ -15,6 +15,7 @@ public struct AppPaths: Sendable {
         self.root = base
         queue = base.appendingPathComponent("queue.json")
         settings = base.appendingPathComponent("settings.json")
+        credentials = base.appendingPathComponent("credentials.json")
         work = base.appendingPathComponent("work", isDirectory: true)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
@@ -71,27 +72,18 @@ public final class JSONStore {
     }
 }
 
-public final class KeychainCredentialStore {
-    private let service = "com.tanchunsiong.ZScribeMac.ZoomBuildCredentials"
-    private let account = "ZoomBuild"
+public final class FileCredentialStore {
+    private let url: URL
 
-    public init() {}
+    public init(paths: AppPaths) {
+        url = paths.credentials
+    }
 
     public func load() throws -> APICredentials? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = item as? Data else {
-            throw keychainError(status)
-        }
-        let object = try JSONSerialization.jsonObject(with: data) as? [String: String]
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let object = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)
+        ) as? [String: String]
         guard let key = object?["apiKey"], let secret = object?["apiSecret"] else { return nil }
         return APICredentials(apiKey: key, apiSecret: secret)
     }
@@ -100,44 +92,16 @@ public final class KeychainCredentialStore {
         let data = try JSONSerialization.data(withJSONObject: [
             "apiKey": credentials.apiKey,
             "apiSecret": credentials.apiSecret
-        ])
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
-        ]
-        let update = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if update == errSecItemNotFound {
-            var insert = query
-            attributes.forEach { insert[$0.key] = $0.value }
-            let status = SecItemAdd(insert as CFDictionary, nil)
-            guard status == errSecSuccess else { throw keychainError(status) }
-        } else if update != errSecSuccess {
-            throw keychainError(update)
-        }
+        ], options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: url, options: [.atomic])
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: url.path
+        )
     }
 
     public func clear() throws {
-        let status = SecItemDelete([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ] as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw keychainError(status)
-        }
-    }
-
-    private func keychainError(_ status: OSStatus) -> NSError {
-        NSError(
-            domain: NSOSStatusErrorDomain,
-            code: Int(status),
-            userInfo: [NSLocalizedDescriptionKey:
-                SecCopyErrorMessageString(status, nil) as String? ?? "Keychain error \(status)"]
-        )
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
     }
 }
