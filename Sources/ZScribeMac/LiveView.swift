@@ -72,14 +72,6 @@ struct LiveView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     sectionLabel("Signal")
                     Toggle("Auto gain", isOn: binding(\.automaticGain))
-                    Toggle("Force output cadence", isOn: binding(\.forceCaptionCadence))
-                    if model.forceCaptionCadence {
-                        Picker("Cadence", selection: binding(\.cadence)) {
-                            ForEach(CaptionCadence.all) { cadence in
-                                Text(cadence.label).tag(cadence)
-                            }
-                        }
-                    }
                 }
                 .disabled(model.isSessionActive)
 

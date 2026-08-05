@@ -116,8 +116,7 @@ struct CoreChecks {
         """#
         let options = LiveScribeOptions(
             language: "ja-JP",
-            vocabularyJSON: vocabularyJSON,
-            forcedCaptionIntervalMilliseconds: 3_000
+            vocabularyJSON: vocabularyJSON
         )
         let data = Data(try ZoomLiveScribeClient.sessionUpdateJSON(options).utf8)
         let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -145,6 +144,13 @@ struct CoreChecks {
             extracted?["phrases"] as? [String] == ["ServiceNow"],
             "Live full config vocabulary extraction"
         )
+        let sample = try ScribeVocabularyJSON.parse(ScribeVocabularyJSON.sample)
+        try expect(
+            sample?["phrases"] as? [String] == [
+                "AIAGW", "Zoom AI Companion", "ServiceNow"
+            ],
+            "Live default vocabulary sample"
+        )
         do {
             try LiveScribeOptions(
                 language: "en-US",
@@ -158,21 +164,6 @@ struct CoreChecks {
                 error.localizedDescription.contains("array of strings"),
                 "Live vocabulary validation"
             )
-        }
-
-        try LiveScribeOptions(
-            language: "en-US",
-            forcedCaptionIntervalMilliseconds: 500
-        ).validate()
-        do {
-            try LiveScribeOptions(
-                language: "en-US",
-                forcedCaptionIntervalMilliseconds: 250
-            ).validate()
-            throw CheckFailure("Live cadence rejection")
-        } catch let error as CheckFailure {
-            throw error
-        } catch {
         }
 
         let completed = try ZoomLiveScribeClient.parseServerEvent(

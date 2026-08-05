@@ -3,16 +3,13 @@ import Foundation
 public struct LiveScribeOptions: Hashable, Sendable {
     public var language: String
     public var vocabularyJSON: String
-    public var forcedCaptionIntervalMilliseconds: Int
 
     public init(
         language: String,
-        vocabularyJSON: String = "",
-        forcedCaptionIntervalMilliseconds: Int = 0
+        vocabularyJSON: String = ""
     ) {
         self.language = language
         self.vocabularyJSON = vocabularyJSON
-        self.forcedCaptionIntervalMilliseconds = forcedCaptionIntervalMilliseconds
     }
 
     public func validate() throws {
@@ -20,12 +17,6 @@ public struct LiveScribeOptions: Hashable, Sendable {
             throw validationError("A transcription language is required.")
         }
         _ = try ScribeVocabularyJSON.parse(vocabularyJSON)
-        guard forcedCaptionIntervalMilliseconds == 0 ||
-            (500...15_000).contains(forcedCaptionIntervalMilliseconds) else {
-            throw validationError(
-                "Forced caption cadence must be off or between 500 and 15,000 ms."
-            )
-        }
     }
 
     private func validationError(_ message: String) -> NSError {
@@ -38,6 +29,31 @@ public struct LiveScribeOptions: Hashable, Sendable {
 }
 
 public enum ScribeVocabularyJSON {
+    public static let sample = """
+    {
+      "phrases": [
+        "AIAGW",
+        "Zoom AI Companion",
+        "ServiceNow"
+      ],
+      "pronunciations": [
+        {
+          "phrase": "AIAGW",
+          "pronunciation": "A I A gateway"
+        }
+      ],
+      "aliases": [
+        {
+          "canonical": "Zoom AI Companion",
+          "variants": [
+            "AI Companion",
+            "Zoom Companion"
+          ]
+        }
+      ]
+    }
+    """
+
     public static func parse(_ json: String) throws -> [String: Any]? {
         let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }

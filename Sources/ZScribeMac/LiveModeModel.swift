@@ -2,21 +2,6 @@ import AppKit
 import Foundation
 import ZScribeCore
 
-struct CaptionCadence: Identifiable, Hashable {
-    let milliseconds: Int
-    let label: String
-    var id: Int { milliseconds }
-
-    static let all = [
-        CaptionCadence(milliseconds: 500, label: "500 ms"),
-        CaptionCadence(milliseconds: 1_000, label: "1 second"),
-        CaptionCadence(milliseconds: 2_000, label: "2 seconds"),
-        CaptionCadence(milliseconds: 3_000, label: "3 seconds"),
-        CaptionCadence(milliseconds: 5_000, label: "5 seconds"),
-        CaptionCadence(milliseconds: 10_000, label: "10 seconds")
-    ]
-}
-
 enum AudioMeterState {
     case normal, warning, clipping
 }
@@ -25,18 +10,28 @@ enum AudioMeterState {
 final class LiveModeModel: ObservableObject {
     @Published private(set) var source: LiveAudioSource = .microphone
     @Published var language = "en-US"
-    @Published var vocabularyJSON = UserDefaults.standard.string(
-        forKey: "liveVocabularyJSON"
-    ) ?? "" {
+    @Published var vocabularyJSON: String = {
+        let defaults = UserDefaults.standard
+        let key = "liveVocabularyJSON"
+        let sampleVersionKey = "liveVocabularySampleVersion"
+        let saved = defaults.string(forKey: key)
+        if defaults.integer(forKey: sampleVersionKey) < 1 {
+            defaults.set(1, forKey: sampleVersionKey)
+            if saved?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                defaults.set(ScribeVocabularyJSON.sample, forKey: key)
+                return ScribeVocabularyJSON.sample
+            }
+        }
+        guard defaults.object(forKey: key) != nil else {
+            return ScribeVocabularyJSON.sample
+        }
+        return saved ?? ""
+    }() {
         didSet {
             UserDefaults.standard.set(vocabularyJSON, forKey: "liveVocabularyJSON")
         }
     }
     @Published var automaticGain = false
-    @Published var forceCaptionCadence = false
-    @Published var cadence = CaptionCadence.all.first {
-        $0.milliseconds == 3_000
-    }!
     @Published private(set) var status = "Ready to connect"
     @Published private(set) var isConnecting = false
     @Published private(set) var isStreaming = false
@@ -52,8 +47,6 @@ final class LiveModeModel: ObservableObject {
     private let client = ZoomLiveScribeClient()
     private var capture: LiveAudioCapture?
     private var sessionTask: Task<Void, Never>?
-    private var microphoneCadenceEnabled = false
-    private var systemAudioCadenceEnabled = true
     private var clipHoldUntil = Date.distantPast
 
     var isSessionActive: Bool { isConnecting || isStreaming || isStopping }
@@ -87,15 +80,7 @@ final class LiveModeModel: ObservableObject {
 
     func setSource(_ newSource: LiveAudioSource) {
         guard !isSessionActive, source != newSource else { return }
-        if source == .microphone {
-            microphoneCadenceEnabled = forceCaptionCadence
-        } else {
-            systemAudioCadenceEnabled = forceCaptionCadence
-        }
         source = newSource
-        forceCaptionCadence = newSource == .microphone
-            ? microphoneCadenceEnabled
-            : systemAudioCadenceEnabled
         status = "Ready to connect"
     }
 
@@ -146,9 +131,7 @@ final class LiveModeModel: ObservableObject {
             }
             let options = LiveScribeOptions(
                 language: language,
-                vocabularyJSON: vocabularyJSON,
-                forcedCaptionIntervalMilliseconds:
-                    forceCaptionCadence ? cadence.milliseconds : 0
+                vocabularyJSON: vocabularyJSON
             )
             try options.validate()
 

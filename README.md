@@ -59,10 +59,9 @@ and transcripts remain in memory unless the transcript is explicitly copied.
 The optional vocabulary editor accepts a vocabulary object, a top-level `vocabulary`
 object, or a full ASR payload containing `config.vocabulary`. The app validates phrases,
 pronunciations, and aliases locally, remembers the JSON between launches, and sends only
-the vocabulary object in the Live session configuration. System Audio defaults to a
-forced three-second output cadence for continuous playback; this can be disabled or
-changed. Stopping drains buffered frames and waits for Zoom to finalize the last speech
-turn.
+the vocabulary object in the Live session configuration. A ready-to-use example is
+provided on first launch. Stopping drains buffered frames and waits for Zoom to finalize
+the last speech turn.
 
 ## Build an app bundle
 

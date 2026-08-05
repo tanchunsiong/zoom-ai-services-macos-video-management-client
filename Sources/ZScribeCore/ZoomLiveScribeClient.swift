@@ -8,7 +8,6 @@ public final class ZoomLiveScribeClient {
     public static let endpoint = URL(
         string: "wss://api.zoom.us/v2/aiservices/scribe/live"
     )!
-    private static let forcedSilence = Data(repeating: 0, count: 3_200)
     private let session: URLSession
 
     public init(session: URLSession = .shared) {
@@ -53,7 +52,7 @@ public final class ZoomLiveScribeClient {
             try await Self.receiveEvents(socket, onEvent: onEvent)
         }
         do {
-            try await sendAudio(frames, options: options, over: socket)
+            try await sendAudio(frames, over: socket)
             try await sendText(#"{"type":"session.close"}"#, over: socket)
             try await withThrowingTaskGroup(of: Void.self) { group in
                 group.addTask { try await receiver.value }
@@ -145,24 +144,11 @@ public final class ZoomLiveScribeClient {
 
     private func sendAudio(
         _ frames: AsyncStream<Data>,
-        options: LiveScribeOptions,
         over socket: URLSessionWebSocketTask
     ) async throws {
-        var lastForcedTurn = ContinuousClock.now
-        let forcedFrameCount = 4
         for await frame in frames {
             try Task.checkCancellation()
             guard !frame.isEmpty else { continue }
-            if options.forcedCaptionIntervalMilliseconds > 0,
-               lastForcedTurn.duration(
-                    to: .now
-               ) >= .milliseconds(options.forcedCaptionIntervalMilliseconds) {
-                for _ in 0..<forcedFrameCount {
-                    try await socket.send(.data(Self.forcedSilence))
-                    try await Task.sleep(for: .milliseconds(100))
-                }
-                lastForcedTurn = .now
-            }
             try await socket.send(.data(frame))
         }
     }
