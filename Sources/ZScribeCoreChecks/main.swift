@@ -143,15 +143,27 @@ struct CoreChecks {
         )
         let data = Data(try ZoomLiveScribeClient.sessionUpdateJSON(options).utf8)
         let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let vocabulary = root?["vocabulary"] as? [String: Any]
+        let config = root?["config"] as? [String: Any]
+        let audio = root?["audio"] as? [String: Any]
+        let vocabulary = config?["vocabulary"] as? [String: Any]
         try expect(root?["type"] as? String == "session.update", "Live session type")
-        try expect(root?["input_audio_format"] as? String == "pcm16", "Live PCM format")
-        try expect(root?["language"] as? String == "ja-JP", "Live language")
-        try expect(root?["turn_detection"] == nil, "Live VAD configuration omitted")
+        try expect(audio?["format"] as? String == "pcm16", "Live PCM format")
+        try expect(config?["language"] as? String == "ja-JP", "Live language")
+        try expect(config?["turn_detection"] == nil, "Live VAD configuration omitted")
+        try expect(root?["language"] == nil, "Legacy top-level Live language omitted")
+        try expect(root?["vocabulary"] == nil, "Legacy top-level vocabulary omitted")
+        try expect(root?["input_audio_format"] == nil, "Legacy Live audio format omitted")
         try expect(
             vocabulary?["phrases"] as? [String] == ["AIAGW", "Zoom AI Companion"],
             "Live vocabulary phrases"
         )
+
+        let blankData = Data(try ZoomLiveScribeClient.sessionUpdateJSON(
+            LiveScribeOptions(language: "en-US")
+        ).utf8)
+        let blankRoot = try JSONSerialization.jsonObject(with: blankData) as? [String: Any]
+        let blankConfig = blankRoot?["config"] as? [String: Any]
+        try expect(blankConfig?["vocabulary"] == nil, "Blank Live vocabulary omitted")
 
         let fullConfig = #"""
         {
