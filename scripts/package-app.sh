@@ -12,6 +12,7 @@ BUNDLE_ID="com.tanchunsiong.ZScribeMac"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/ZScribeMac" "$APP/Contents/MacOS/ZScribeMac"
+cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -30,6 +31,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>Z Scribe</string>
     <key>CFBundleDisplayName</key>
     <string>Z Scribe</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
