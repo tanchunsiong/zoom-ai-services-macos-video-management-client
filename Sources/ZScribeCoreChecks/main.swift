@@ -158,6 +158,20 @@ struct CoreChecks {
             "Live vocabulary phrases"
         )
 
+        for language in LanguageCatalog.all {
+            let languageData = Data(try ZoomLiveScribeClient.sessionUpdateJSON(
+                LiveScribeOptions(language: language.locale)
+            ).utf8)
+            let languageRoot = try JSONSerialization.jsonObject(
+                with: languageData
+            ) as? [String: Any]
+            let languageConfig = languageRoot?["config"] as? [String: Any]
+            try expect(
+                languageConfig?["language"] as? String == language.locale,
+                "Live selector language \(language.locale)"
+            )
+        }
+
         let blankData = Data(try ZoomLiveScribeClient.sessionUpdateJSON(
             LiveScribeOptions(language: "en-US")
         ).utf8)
