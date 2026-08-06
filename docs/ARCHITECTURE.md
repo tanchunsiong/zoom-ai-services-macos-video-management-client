@@ -57,6 +57,10 @@ request envelope, but extracts only `config.vocabulary`; batch-only config field
 top-level `reference_id` are not forwarded to the Live session. Until the deployed Live
 endpoint completes its schema transition, the client mirrors language, PCM format, and
 vocabulary in the accepted top-level fields. Neither form includes VAD configuration.
+When Live translation is selected, each finalized Scribe segment is sent to Zoom
+Translator Fast mode using the configured source and target locales. Non-English pairs
+follow the existing English-pivot route. Results are attached by segment ID so translated
+text remains directly beneath the correct detected text even if requests finish out of order.
 
 ## Failure and recovery
 

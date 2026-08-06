@@ -163,11 +163,25 @@ public struct LiveTranscriptSegment: Identifiable, Hashable, Sendable {
     public var number: Int
     public var at: Date
     public var text: String
+    public var translation: String?
+    public var translationError: String?
+    public var isTranslating: Bool
 
-    public init(id: UUID = UUID(), number: Int, at: Date = .now, text: String) {
+    public init(
+        id: UUID = UUID(),
+        number: Int,
+        at: Date = .now,
+        text: String,
+        translation: String? = nil,
+        translationError: String? = nil,
+        isTranslating: Bool = false
+    ) {
         self.id = id
         self.number = number
         self.at = at
         self.text = text
+        self.translation = translation
+        self.translationError = translationError
+        self.isTranslating = isTranslating
     }
 }

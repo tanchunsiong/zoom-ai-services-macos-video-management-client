@@ -11,6 +11,7 @@ struct CoreChecks {
         try livePCMFramesAndLevels()
         try liveSessionContractAndEvents()
         try await scribeRequestMatchesContract()
+        try await liveTranslationMatchesContract()
         try streamedScribeBodyRoundTripsMultipleChunks()
         try await queueSearchCoversAllArtifactsAndInvalidatesCache()
         try recursiveMediaDiscoveryPreservesDuplicates()
@@ -370,6 +371,31 @@ struct CoreChecks {
         try expect(config?["channel_separation"] as? Bool == false, "Scribe channel config")
     }
 
+    static func liveTranslationMatchesContract() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let client = ZoomAIClient(session: URLSession(configuration: configuration))
+        let translation = try await client.translate(
+            "Technical terms",
+            source: "en-US",
+            target: "zh-CN",
+            credentials: APICredentials(apiKey: "key", apiSecret: "secret")
+        )
+        try expect(translation == "Translated terms", "Live translated text")
+        let body = try MockURLProtocol.lastBody()
+        let root = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let config = root?["config"] as? [String: Any]
+        try expect(root?["text"] as? String == "Technical terms", "Live translation text")
+        try expect(
+            config?["source_language"] as? String == "en-US",
+            "Live translation source language"
+        )
+        try expect(
+            config?["target_languages"] as? [String] == ["zh-CN"],
+            "Live translation target language"
+        )
+    }
+
     static func streamedScribeBodyRoundTripsMultipleChunks() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -625,7 +651,17 @@ final class MockURLProtocol: URLProtocol {
             url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
             headerFields: ["Content-Type": "application/json"]
         )!
-        let payload = Data(#"{"result":{"text_display":"Hello","segments":[{"start":0,"end":1,"text":"Hello"}]}}"#.utf8)
+        let payload: Data
+        if request.url?.path.hasSuffix("/translator/translate") == true {
+            let root = try? JSONSerialization.jsonObject(with: requestBody) as? [String: Any]
+            let config = root?["config"] as? [String: Any]
+            let target = (config?["target_languages"] as? [String])?.first ?? "en-US"
+            payload = (try? JSONSerialization.data(withJSONObject: [
+                "result": ["translations": [target: "Translated terms"]]
+            ])) ?? Data()
+        } else {
+            payload = Data(#"{"result":{"text_display":"Hello","segments":[{"start":0,"end":1,"text":"Hello"}]}}"#.utf8)
+        }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: payload)
         client?.urlProtocolDidFinishLoading(self)

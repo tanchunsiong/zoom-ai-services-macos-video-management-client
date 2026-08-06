@@ -11,7 +11,7 @@ Scribe, Translator, and Summarizer. This is the macOS counterpart to
   transcript JSON, and summary sidecars, composed with media-status filters.
 - Live microphone or Mac system-audio transcription over Zoom Scribe's authenticated
   WebSocket endpoint, with an input meter, auto gain, per-session vocabulary JSON,
-  interim words, and completed speech turns.
+  interim words, completed speech turns, and optional paired Zoom translation.
 - English, Simplified Chinese, Japanese, Spanish, and Italian transcription.
 - Optional cue-preserving translation, including non-English routes bridged through English.
 - Optional Zoom Summarizer output for each job.

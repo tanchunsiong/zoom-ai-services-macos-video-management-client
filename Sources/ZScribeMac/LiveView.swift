@@ -67,6 +67,18 @@ struct LiveView: View {
                     .disabled(model.isSessionActive)
                 }
 
+                VStack(alignment: .leading, spacing: 8) {
+                    sectionLabel("Translation")
+                    Picker("Translation language", selection: binding(\.translationLanguage)) {
+                        Text("None").tag("")
+                        ForEach(LanguageCatalog.all.filter { $0.locale != model.language }) {
+                            Text($0.name).tag($0.locale)
+                        }
+                    }
+                    .labelsHidden()
+                    .disabled(model.isSessionActive)
+                }
+
                 vocabularyEditor
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -170,12 +182,28 @@ struct LiveView: View {
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
                                 .frame(width: 28, alignment: .trailing)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(segment.text)
-                                    .textSelection(.enabled)
-                                Text(segment.at, style: .time)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(segment.text)
+                                        .textSelection(.enabled)
+                                    Spacer(minLength: 8)
+                                    Text(segment.at, style: .time)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    if segment.isTranslating {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else if let error = segment.translationError {
+                                        Image(systemName: "exclamationmark.triangle")
+                                            .foregroundStyle(.red)
+                                            .help(error)
+                                    }
+                                }
+                                if let translation = segment.translation {
+                                    Text(translation)
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
                             }
                         }
                         .padding(.vertical, 4)

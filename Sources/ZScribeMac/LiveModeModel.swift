@@ -9,7 +9,20 @@ enum AudioMeterState {
 @MainActor
 final class LiveModeModel: ObservableObject {
     @Published private(set) var source: LiveAudioSource = .microphone
-    @Published var language = "en-US"
+    @Published var language = "en-US" {
+        didSet {
+            if translationLanguage == language {
+                translationLanguage = ""
+            }
+        }
+    }
+    @Published var translationLanguage = UserDefaults.standard.string(
+        forKey: "liveTranslationLanguage"
+    ) ?? "" {
+        didSet {
+            UserDefaults.standard.set(translationLanguage, forKey: "liveTranslationLanguage")
+        }
+    }
     @Published var vocabularyJSON: String = {
         let defaults = UserDefaults.standard
         let key = "liveVocabularyJSON"
@@ -45,18 +58,33 @@ final class LiveModeModel: ObservableObject {
 
     private let credentialStore: FileCredentialStore
     private let client = ZoomLiveScribeClient()
+    private let translator = ZoomAIClient()
     private var capture: LiveAudioCapture?
     private var sessionTask: Task<Void, Never>?
+    private var translationTasks: [UUID: Task<Void, Never>] = [:]
     private var clipHoldUntil = Date.distantPast
 
     init(credentialStore: FileCredentialStore) {
         self.credentialStore = credentialStore
+        if translationLanguage == language ||
+            !LanguageCatalog.all.contains(where: { $0.locale == translationLanguage }) {
+            translationLanguage = ""
+        }
     }
 
     var isSessionActive: Bool { isConnecting || isStreaming || isStopping }
     var canStart: Bool { !isSessionActive && vocabularyError == nil }
     var canStop: Bool { (isConnecting || isStreaming) && !isStopping }
-    var transcriptText: String { segments.map(\.text).joined(separator: "\n") }
+    var transcriptText: String {
+        segments.flatMap { segment in
+            [segment.text, segment.translation].compactMap { value in
+                guard let value,
+                      !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else { return nil }
+                return value
+            }
+        }.joined(separator: "\n")
+    }
     var segmentCountLabel: String {
         "\(segments.count) completed segment\(segments.count == 1 ? "" : "s")"
     }
@@ -117,6 +145,8 @@ final class LiveModeModel: ObservableObject {
     }
 
     func clearTranscript() {
+        translationTasks.values.forEach { $0.cancel() }
+        translationTasks.removeAll()
         segments.removeAll()
         interimTranscript = ""
     }
@@ -160,7 +190,7 @@ final class LiveModeModel: ObservableObject {
                 options: options,
                 credentials: credentials
             ) { [weak self] event in
-                Task { @MainActor in self?.handle(event) }
+                Task { @MainActor in self?.handle(event, credentials: credentials) }
             }
             status = segments.isEmpty
                 ? "Session closed; no speech was transcribed"
@@ -181,7 +211,7 @@ final class LiveModeModel: ObservableObject {
         resetMeter()
     }
 
-    private func handle(_ event: LiveScribeEvent) {
+    private func handle(_ event: LiveScribeEvent, credentials: APICredentials) {
         switch event.type {
         case "session.created":
             status = "Connected; configuring Live mode..."
@@ -199,10 +229,20 @@ final class LiveModeModel: ObservableObject {
             if let text = event.transcript?.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ), !text.isEmpty {
-                segments.append(LiveTranscriptSegment(
+                let segment = LiveTranscriptSegment(
                     number: segments.count + 1,
-                    text: text
-                ))
+                    text: text,
+                    isTranslating: !translationLanguage.isEmpty
+                )
+                segments.append(segment)
+                if !translationLanguage.isEmpty {
+                    translate(
+                        segment,
+                        source: language,
+                        target: translationLanguage,
+                        credentials: credentials
+                    )
+                }
             }
             interimTranscript = ""
             status = "Listening"
@@ -219,6 +259,39 @@ final class LiveModeModel: ObservableObject {
                 status = "Receiving captions"
             }
         }
+    }
+
+    private func translate(
+        _ segment: LiveTranscriptSegment,
+        source: String,
+        target: String,
+        credentials: APICredentials
+    ) {
+        let id = segment.id
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer { translationTasks[id] = nil }
+            do {
+                let translation = try await translator.translate(
+                    segment.text,
+                    source: source,
+                    target: target,
+                    credentials: credentials
+                )
+                guard !Task.isCancelled,
+                      let index = segments.firstIndex(where: { $0.id == id })
+                else { return }
+                segments[index].translation = translation
+                segments[index].translationError = nil
+                segments[index].isTranslating = false
+            } catch is CancellationError {
+            } catch {
+                guard let index = segments.firstIndex(where: { $0.id == id }) else { return }
+                segments[index].translationError = error.localizedDescription
+                segments[index].isTranslating = false
+            }
+        }
+        translationTasks[id] = task
     }
 
     private func updateMeter(_ reading: PCM16LevelReading) {

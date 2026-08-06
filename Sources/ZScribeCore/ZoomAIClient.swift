@@ -116,6 +116,32 @@ public final class ZoomAIClient {
         )
     }
 
+    public func translate(
+        _ text: String, source: String, target: String, credentials: APICredentials
+    ) async throws -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        var translated = trimmed
+        for step in TranslationRoute.build(source: source, target: target) {
+            let result = try await translateText(
+                translated,
+                source: step.0,
+                target: step.1,
+                credentials: credentials
+            )
+            guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw NSError(
+                    domain: "ZScribe.Live.Translation",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "Zoom Translator returned an empty translation."]
+                )
+            }
+            translated = result.text
+        }
+        return translated
+    }
+
     public func summarize(
         _ text: String, language: String, credentials: APICredentials
     ) async throws -> SummaryResult {
