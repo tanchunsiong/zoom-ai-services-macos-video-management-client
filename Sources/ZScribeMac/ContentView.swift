@@ -36,7 +36,7 @@ struct ContentView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if model.selectedSection != .live {
+                if model.selectedSection != .live && model.selectedSection != .review {
                     statusBar
                 }
             }

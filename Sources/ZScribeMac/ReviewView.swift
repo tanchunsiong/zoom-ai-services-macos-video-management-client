@@ -11,9 +11,11 @@ final class ReviewPlayer: ObservableObject {
     @Published var duration: Double = 0
     @Published var activeCueID: Int?
     @Published var rate: Float = 1
+    @Published private(set) var isPlaying = false
     @Published var isPreparingPlayback = false
     @Published var playbackError: String?
     private var observer: Any?
+    private var playbackStatusObserver: NSKeyValueObservation?
     private var loadedJobID: UUID?
     private var loadTask: Task<Void, Never>?
 
@@ -32,10 +34,19 @@ final class ReviewPlayer: ObservableObject {
                 if itemDuration.isFinite { self.duration = max(0, itemDuration) }
             }
         }
+        playbackStatusObserver = player.observe(
+            \.timeControlStatus,
+            options: [.initial, .new]
+        ) { [weak self] player, _ in
+            Task { @MainActor [weak self] in
+                self?.isPlaying = player.timeControlStatus == .playing
+            }
+        }
     }
 
     deinit {
         loadTask?.cancel()
+        playbackStatusObserver?.invalidate()
         if let observer { player.removeTimeObserver(observer) }
     }
 
@@ -45,6 +56,7 @@ final class ReviewPlayer: ObservableObject {
         loadTask?.cancel()
         player.pause()
         player.replaceCurrentItem(with: nil)
+        isPlaying = false
         isPreparingPlayback = true
         playbackError = nil
         let captionPath = job.translatedVttPath ?? job.originalVttPath
@@ -77,24 +89,82 @@ final class ReviewPlayer: ObservableObject {
     }
 
     func togglePlayback() {
-        if player.timeControlStatus == .playing {
+        guard player.currentItem != nil, !isPreparingPlayback, playbackError == nil else { return }
+        if isPlaying {
             player.pause()
         } else {
+            if duration > 0, position >= duration - 0.1 {
+                seek(0)
+            }
             player.playImmediately(atRate: rate)
         }
-        objectWillChange.send()
     }
 
     func seek(_ seconds: Double, play: Bool = false) {
-        player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600),
+        let upperBound = duration > 0 ? duration : max(0, seconds)
+        let target = min(max(0, seconds), upperBound)
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                     toleranceBefore: .zero, toleranceAfter: .zero)
-        position = seconds
+        position = target
         if play { player.playImmediately(atRate: rate) }
     }
 
     func changeRate(_ value: Float) {
+        guard Self.playbackRates.contains(value) else { return }
         rate = value
-        if player.timeControlStatus == .playing { player.rate = value }
+        if isPlaying { player.rate = value }
+    }
+
+    static let playbackRates: [Float] = [1, 1.5, 2]
+    var canControlPlayback: Bool {
+        player.currentItem != nil && !isPreparingPlayback && playbackError == nil
+    }
+}
+
+private final class PlayerSurfaceView: NSView {
+    let playerLayer = AVPlayerLayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.cgColor
+        layer?.masksToBounds = true
+        playerLayer.videoGravity = .resizeAspect
+        layer?.addSublayer(playerLayer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    override func layout() {
+        super.layout()
+        playerLayer.frame = bounds
+    }
+}
+
+private struct NativeVideoPlayer: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> PlayerSurfaceView {
+        let view = PlayerSurfaceView()
+        view.playerLayer.player = player
+        return view
+    }
+
+    func updateNSView(_ view: PlayerSurfaceView, context: Context) {
+        if view.playerLayer.player !== player {
+            view.playerLayer.player = player
+        }
+    }
+
+    static func dismantleNSView(_ view: PlayerSurfaceView, coordinator: ()) {
+        view.playerLayer.player = nil
     }
 }
 
@@ -154,35 +224,44 @@ struct ReviewView: View {
     }
 
     private func playerPane(_ job: QueueJob) -> some View {
-        VStack(spacing: 0) {
-            VideoPlayer(player: playback.player)
-                .background(.black)
-                .overlay {
-                    if playback.isPreparingPlayback {
-                        ProgressView("Preparing playback...")
-                            .padding(12)
-                            .background(.black.opacity(0.75))
+        let active = playback.cues.first(where: { $0.id == playback.activeCueID })
+        return GeometryReader { geometry in
+            let captionHeight = active == nil ? 0.0 : 58.0
+            VStack(spacing: 0) {
+                NativeVideoPlayer(player: playback.player)
+                    .frame(
+                        width: geometry.size.width,
+                        height: max(0, geometry.size.height - 48 - captionHeight)
+                    )
+                    .background(.black)
+                    .overlay {
+                        if playback.isPreparingPlayback {
+                            ProgressView("Preparing playback...")
+                                .padding(12)
+                                .background(.black.opacity(0.75))
+                                .foregroundStyle(.white)
+                        } else if let error = playback.playbackError {
+                            ContentUnavailableView(
+                                "Playback Failed",
+                                systemImage: "exclamationmark.triangle",
+                                description: Text(error)
+                            )
                             .foregroundStyle(.white)
-                    } else if let error = playback.playbackError {
-                        ContentUnavailableView(
-                            "Playback Failed",
-                            systemImage: "exclamationmark.triangle",
-                            description: Text(error)
-                        )
-                        .foregroundStyle(.white)
+                        }
                     }
+                if let active {
+                    Text(active.text)
+                        .font(.body.weight(.medium))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .padding(.horizontal, 20)
+                        .frame(maxWidth: .infinity, minHeight: 58, maxHeight: 58)
+                        .background(.black.opacity(0.88))
+                        .foregroundStyle(.white)
                 }
-            if let active = playback.cues.first(where: { $0.id == playback.activeCueID }) {
-                Text(active.text)
-                    .font(.body.weight(.medium))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
-                    .padding(.horizontal, 20)
-                    .frame(maxWidth: .infinity, minHeight: 58)
-                    .background(.black.opacity(0.88))
-                    .foregroundStyle(.white)
+                controls
             }
-            controls
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .background(.black)
     }
@@ -192,10 +271,11 @@ struct ReviewView: View {
             Button {
                 playback.togglePlayback()
             } label: {
-                Image(systemName: playback.player.timeControlStatus == .playing
+                Image(systemName: playback.isPlaying
                       ? "pause.fill" : "play.fill")
             }
             .buttonStyle(.borderless)
+            .disabled(!playback.canControlPlayback)
             .help("Play or pause")
 
             Text(clock(playback.position))
@@ -205,6 +285,8 @@ struct ReviewView: View {
                 get: { playback.position },
                 set: { playback.seek($0) }
             ), in: 0...max(1, playback.duration))
+            .disabled(!playback.canControlPlayback || playback.duration <= 0)
+            .help("Playback timeline")
             Text(clock(playback.duration))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -212,13 +294,14 @@ struct ReviewView: View {
                 get: { playback.rate },
                 set: { playback.changeRate($0) }
             )) {
-                Text("1x").tag(Float(1))
-                Text("1.5x").tag(Float(1.5))
-                Text("2x").tag(Float(2))
-                Text("4x").tag(Float(4))
+                ForEach(ReviewPlayer.playbackRates, id: \.self) { rate in
+                    Text(rate == 1 ? "1x" : String(format: "%gx", rate)).tag(rate)
+                }
             }
             .labelsHidden()
             .frame(width: 68)
+            .disabled(!playback.canControlPlayback)
+            .help("Playback speed")
         }
         .padding(.horizontal, 14)
         .frame(height: 48)
