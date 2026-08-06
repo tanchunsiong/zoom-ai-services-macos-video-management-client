@@ -141,13 +141,15 @@ struct QueueView: View {
 
     private var columnHeaders: some View {
         Grid(horizontalSpacing: 12) {
-            GridRow {
+            GridRow(alignment: .top) {
                 Text("MEDIA").gridColumnAlignment(.leading)
                 Text("SPOKEN").frame(width: 112, alignment: .leading)
                 Text("TRANSLATE").frame(width: 112, alignment: .leading)
-                Text("SUMMARY").frame(width: 70)
-                Text("STATUS").frame(width: 150, alignment: .leading)
-                Text("").frame(width: 90)
+                Text("SUMMARY").frame(width: 76, alignment: .leading)
+                Text("PRICE").frame(width: 72, alignment: .leading)
+                Text("TIME").frame(width: 72, alignment: .leading)
+                Text("STATUS").frame(width: 138, alignment: .leading)
+                Text("").frame(width: 58, alignment: .leading)
             }
         }
         .font(.caption2.weight(.semibold))
@@ -157,28 +159,36 @@ struct QueueView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
+        VStack(alignment: .leading, spacing: 10) {
             Label("No Media", systemImage: "film.stack")
-        } description: {
+                .font(.title3.weight(.semibold))
             Text("Drop video or audio files here.")
-        } actions: {
+                .foregroundStyle(.secondary)
             Button("Choose Media", systemImage: "plus") { model.chooseFiles() }
                 .buttonStyle(.borderedProminent)
+            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
     private var noMatchesState: some View {
-        if model.hasQueueSearch {
-            ContentUnavailableView.search(text: model.queueSearchText)
-        } else {
-            ContentUnavailableView(
-                "No Matching Media",
-                systemImage: "line.3.horizontal.decrease.circle",
-                description: Text("No queue items match this media filter.")
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                model.hasQueueSearch ? "No Search Results" : "No Matching Media",
+                systemImage: model.hasQueueSearch
+                    ? "magnifyingglass" : "line.3.horizontal.decrease.circle"
             )
+            .font(.title3.weight(.semibold))
+            Text(model.hasQueueSearch
+                 ? "No queue items match \"\(model.queueSearchText)\"."
+                 : "No queue items match this media filter.")
+                .foregroundStyle(.secondary)
+            Spacer()
         }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -188,7 +198,7 @@ private struct QueueRow: View {
 
     var body: some View {
         Grid(horizontalSpacing: 12) {
-            GridRow {
+            GridRow(alignment: .top) {
                 media
                 languagePicker
                 translationPicker
@@ -197,9 +207,16 @@ private struct QueueRow: View {
                     set: { model.setSummarize($0, for: job.id) }
                 ))
                 .labelsHidden()
-                .frame(width: 70)
+                .toggleStyle(.checkbox)
+                .frame(width: 76, alignment: .leading)
+                .help(job.summarize ? "Summary enabled" : "Summary disabled")
+                Text(model.estimatedCostLabel(for: job))
+                    .frame(width: 72, alignment: .leading)
+                Label(model.estimatedTimeLabel(for: job), systemImage: "clock")
+                    .labelStyle(.titleOnly)
+                    .frame(width: 72, alignment: .leading)
                 status
-                actions.frame(width: 90, alignment: .trailing)
+                actions.frame(width: 58, alignment: .leading)
             }
         }
         .padding(.horizontal, 16)
@@ -239,12 +256,8 @@ private struct QueueRow: View {
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 3) {
                 Text(job.displayName).lineLimit(1).fontWeight(.medium)
-                HStack(spacing: 8) {
-                    Text(job.durationLabel)
-                    Text(model.costLabel(for: job))
-                    Label(model.estimatedTimeLabel(for: job), systemImage: "clock")
-                }
-                .font(.caption)
+                Text(job.durationLabel)
+                    .font(.caption)
                 .foregroundStyle(.secondary)
             }
         }
@@ -290,7 +303,7 @@ private struct QueueRow: View {
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .frame(width: 150, alignment: .leading)
+        .frame(width: 138, alignment: .leading)
     }
 
     private var actions: some View {

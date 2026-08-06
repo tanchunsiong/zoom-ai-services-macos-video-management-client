@@ -69,7 +69,7 @@ public struct QueueJob: Codable, Identifiable, Hashable, Sendable {
     public var events: [JobEvent]
 
     public init(sourcePath: String, sourceLanguage: String = "en-US",
-                translationLanguage: String = "", summarize: Bool = true) {
+                translationLanguage: String = "", summarize: Bool = false) {
         id = UUID()
         self.sourcePath = sourcePath
         self.sourceLanguage = sourceLanguage

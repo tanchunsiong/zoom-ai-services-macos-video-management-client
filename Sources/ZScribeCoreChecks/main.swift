@@ -19,6 +19,7 @@ struct CoreChecks {
         segmentDurationObservesUploadTarget()
         languageAwareCostEstimate()
         try summaryNormalizationRemovesDuplicateSections()
+        try summariesAreOptIn()
         try partialOutputsResumeOnlyMissingWork()
         try processingTimeEstimatesAndCalibration()
         try playbackCompatibilityArgumentsPreserveVideo()
@@ -512,6 +513,28 @@ struct CoreChecks {
         try expect(normalized.contains("## Decisions"), "Distinct summary section retained")
         try expect(normalized.contains("# Recap"), "Recap retained")
         try expect(normalized.contains("# Action Items"), "Action items retained")
+    }
+
+    static func summariesAreOptIn() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("meeting.mp4")
+        var job = QueueJob(sourcePath: source.path)
+        try expect(!job.summarize, "New jobs do not summarize by default")
+        let estimate = CostEstimator.estimate(job, settings: UserSettings())
+        try expect(estimate.summarize == 0, "Disabled summary has no estimated cost")
+        let sidecars = MediaPipeline.sidecarURLs(for: source, translationLanguage: "")
+        try "WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.000\nHello\n"
+            .write(to: sidecars.originalVTT, atomically: true, encoding: .utf8)
+        try "# Summary\n\nOld summary"
+            .write(to: sidecars.summary, atomically: true, encoding: .utf8)
+        job.summaryPath = sidecars.summary.path
+        job.reuseExistingSummary = true
+        job = MediaPipeline.applyExistingOutputs(to: job)
+        try expect(job.summaryPath == nil, "Disabled summary does not attach an old sidecar")
+        try expect(job.reuseExistingSummary != true, "Disabled summary does not reuse a sidecar")
     }
 
     static func partialOutputsResumeOnlyMissingWork() throws {

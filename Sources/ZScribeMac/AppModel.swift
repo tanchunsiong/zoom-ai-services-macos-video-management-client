@@ -119,12 +119,8 @@ final class AppModel: ObservableObject {
         )
     }
 
-    func costLabel(for job: QueueJob) -> String {
-        let estimate = CostEstimator.estimate(job, settings: settings)
-        guard let actual = CostEstimator.actual(job, settings: settings) else {
-            return CostEstimator.format(estimate.total)
-        }
-        return "\(CostEstimator.format(estimate.total)) / \(CostEstimator.format(actual.total))"
+    func estimatedCostLabel(for job: QueueJob) -> String {
+        CostEstimator.format(CostEstimator.estimate(job, settings: settings).total)
     }
 
     var readyCount: Int { jobs.filter { $0.state == .ready }.count }
@@ -295,6 +291,10 @@ final class AppModel: ObservableObject {
         update(id) { job in
             guard !job.state.isProcessing else { return }
             job.summarize = enabled
+            if !enabled {
+                job.summaryPath = nil
+                job.reuseExistingSummary = false
+            }
             if enabled && job.state == .ready && job.summaryPath == nil {
                 job.report(.queued, progress: 0, "Summary queued")
             }

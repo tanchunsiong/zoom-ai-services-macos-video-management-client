@@ -67,7 +67,8 @@ final class ReviewPlayer: ObservableObject {
         }
         summary = job.summaryPath.flatMap {
             try? String(contentsOfFile: $0, encoding: .utf8)
-        } ?? "No summary was generated for this job."
+        }.map(ZoomAIClient.normalizeSummaryText)
+            ?? "No summary was generated for this job."
         position = 0
         duration = max(0, job.durationSeconds ?? 0)
         loadTask = Task { [weak self] in
@@ -347,10 +348,9 @@ struct ReviewView: View {
                 }
             } else {
                 ScrollView {
-                    Text(markdown(playback.summary))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
+                    SummaryDocumentView(text: playback.summary)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 16)
                 }
             }
         }
@@ -364,5 +364,116 @@ struct ReviewView: View {
         return value >= 3600
             ? String(format: "%02d:%02d:%02d", value / 3600, value / 60 % 60, value % 60)
             : String(format: "%02d:%02d", value / 60, value % 60)
+    }
+}
+
+private struct SummaryDocumentView: View {
+    private enum BlockKind {
+        case heading(Int)
+        case paragraph
+        case listItem(marker: String)
+    }
+
+    private struct Block: Identifiable {
+        let id: Int
+        let kind: BlockKind
+        let text: String
+    }
+
+    let text: String
+
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 14) {
+            ForEach(blocks) { block in
+                switch block.kind {
+                case .heading(let level):
+                    Text(inlineMarkdown(block.text))
+                        .font(headingFont(level))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, level == 1 ? 2 : 6)
+                case .paragraph:
+                    Text(inlineMarkdown(block.text))
+                        .lineSpacing(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                case .listItem(let marker):
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(marker)
+                            .frame(width: 18, alignment: .trailing)
+                        Text(inlineMarkdown(block.text))
+                            .lineSpacing(3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var blocks: [Block] {
+        var result: [(BlockKind, String)] = []
+        var paragraph: [String] = []
+
+        func flushParagraph() {
+            guard !paragraph.isEmpty else { return }
+            result.append((.paragraph, paragraph.joined(separator: " ")))
+            paragraph.removeAll()
+        }
+
+        for rawLine in text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty {
+                flushParagraph()
+                continue
+            }
+            if let heading = parseHeading(line) {
+                flushParagraph()
+                result.append((.heading(heading.level), heading.text))
+            } else if let item = parseListItem(line) {
+                flushParagraph()
+                result.append((.listItem(marker: item.marker), item.text))
+            } else {
+                paragraph.append(line)
+            }
+        }
+        flushParagraph()
+        return result.enumerated().map { Block(id: $0.offset, kind: $0.element.0, text: $0.element.1) }
+    }
+
+    private func parseHeading(_ line: String) -> (level: Int, text: String)? {
+        let hashes = line.prefix { $0 == "#" }.count
+        guard hashes > 0, hashes <= 6, line.dropFirst(hashes).first == " " else { return nil }
+        return (hashes, line.dropFirst(hashes + 1).trimmingCharacters(in: .whitespaces))
+    }
+
+    private func parseListItem(_ line: String) -> (marker: String, text: String)? {
+        for prefix in ["- ", "* ", "+ ", "• "] where line.hasPrefix(prefix) {
+            return ("•", String(line.dropFirst(prefix.count)))
+        }
+        guard let separator = line.firstIndex(where: \Character.isWhitespace) else { return nil }
+        let token = line[..<separator]
+        guard let suffix = token.last,
+              suffix == "." || suffix == ")",
+              let number = Int(token.dropLast()) else { return nil }
+        let text = line[separator...].trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return nil }
+        return ("\(number).", text)
+    }
+
+    private func inlineMarkdown(_ value: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: value,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(value)
+    }
+
+    private func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: .title2.weight(.semibold)
+        case 2: .headline.weight(.semibold)
+        default: .subheadline.weight(.semibold)
+        }
     }
 }

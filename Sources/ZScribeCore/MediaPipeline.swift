@@ -23,6 +23,10 @@ public final class MediaPipeline {
         job.translationOutputCharacters = 0
         job.summaryInputCharacters = 0
         job.summaryOutputCharacters = 0
+        if !job.summarize {
+            job.summaryPath = nil
+            job.reuseExistingSummary = false
+        }
         let work = paths.work.appendingPathComponent(job.id.uuidString, isDirectory: true)
         try? FileManager.default.removeItem(at: work)
         defer { try? FileManager.default.removeItem(at: work) }
@@ -245,6 +249,10 @@ public final class MediaPipeline {
 
     public static func applyExistingOutputs(to sourceJob: QueueJob) -> QueueJob {
         var job = sourceJob
+        if !job.summarize {
+            job.summaryPath = nil
+            job.reuseExistingSummary = false
+        }
         let urls = sidecarURLs(
             for: URL(fileURLWithPath: job.sourcePath),
             translationLanguage: job.translationLanguage
@@ -262,7 +270,7 @@ public final class MediaPipeline {
                 job.translatedVttPath = urls.translatedVTT.path
                 job.reuseExistingTranslation = true
             }
-            if hasSummary {
+            if job.summarize, hasSummary {
                 job.summaryPath = urls.summary.path
                 job.reuseExistingSummary = true
                 if let text = try? String(contentsOf: urls.summary, encoding: .utf8) {
