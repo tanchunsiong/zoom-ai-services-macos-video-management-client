@@ -2,6 +2,18 @@ import SwiftUI
 import UniformTypeIdentifiers
 import ZScribeCore
 
+private enum QueueColumns {
+    static let spacing: CGFloat = 12
+    static let spoken: CGFloat = 112
+    static let translation: CGFloat = 112
+    static let summary: CGFloat = 76
+    static let price: CGFloat = 72
+    static let time: CGFloat = 72
+    static let status: CGFloat = 138
+    static let actions: CGFloat = 58
+    static let minimumTableWidth: CGFloat = 1_040
+}
+
 struct QueueView: View {
     @EnvironmentObject private var model: AppModel
     @State private var isTargeted = false
@@ -17,22 +29,33 @@ struct QueueView: View {
             } else if model.filteredJobs.isEmpty {
                 noMatchesState
             } else {
-                columnHeaders
-                Divider()
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(model.filteredJobs) { job in
-                                QueueRow(job: job)
-                                    .id(job.id)
-                                Divider().padding(.leading, 42)
+                GeometryReader { geometry in
+                    ScrollView(.horizontal) {
+                        VStack(spacing: 0) {
+                            columnHeaders
+                            Divider()
+                            ScrollViewReader { proxy in
+                                ScrollView(.vertical) {
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(model.filteredJobs) { job in
+                                            QueueRow(job: job)
+                                                .id(job.id)
+                                            Divider().padding(.leading, 42)
+                                        }
+                                    }
+                                }
+                                .onChange(of: model.activeJobID) { _, id in
+                                    if let id {
+                                        withAnimation { proxy.scrollTo(id, anchor: .center) }
+                                    }
+                                }
                             }
                         }
-                    }
-                    .onChange(of: model.activeJobID) { _, id in
-                        if let id {
-                            withAnimation { proxy.scrollTo(id, anchor: .center) }
-                        }
+                        .frame(
+                            width: max(geometry.size.width, QueueColumns.minimumTableWidth),
+                            height: geometry.size.height,
+                            alignment: .topLeading
+                        )
                     }
                 }
             }
@@ -140,17 +163,15 @@ struct QueueView: View {
     }
 
     private var columnHeaders: some View {
-        Grid(horizontalSpacing: 12) {
-            GridRow(alignment: .top) {
-                Text("MEDIA").gridColumnAlignment(.leading)
-                Text("SPOKEN").frame(width: 112, alignment: .leading)
-                Text("TRANSLATE").frame(width: 112, alignment: .leading)
-                Text("SUMMARY").frame(width: 76, alignment: .leading)
-                Text("PRICE").frame(width: 72, alignment: .leading)
-                Text("TIME").frame(width: 72, alignment: .leading)
-                Text("STATUS").frame(width: 138, alignment: .leading)
-                Text("").frame(width: 58, alignment: .leading)
-            }
+        HStack(alignment: .top, spacing: QueueColumns.spacing) {
+            Text("MEDIA").frame(maxWidth: .infinity, alignment: .leading)
+            Text("SPOKEN").frame(width: QueueColumns.spoken, alignment: .leading)
+            Text("TRANSLATE").frame(width: QueueColumns.translation, alignment: .leading)
+            Text("SUMMARY").frame(width: QueueColumns.summary, alignment: .leading)
+            Text("PRICE").frame(width: QueueColumns.price, alignment: .leading)
+            Text("TIME").frame(width: QueueColumns.time, alignment: .leading)
+            Text("STATUS").frame(width: QueueColumns.status, alignment: .leading)
+            Text("").frame(width: QueueColumns.actions, alignment: .leading)
         }
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.secondary)
@@ -197,28 +218,27 @@ private struct QueueRow: View {
     let job: QueueJob
 
     var body: some View {
-        Grid(horizontalSpacing: 12) {
-            GridRow(alignment: .top) {
-                media
-                languagePicker
-                translationPicker
-                Toggle("", isOn: Binding(
-                    get: { job.summarize },
-                    set: { model.setSummarize($0, for: job.id) }
-                ))
-                .labelsHidden()
-                .toggleStyle(.checkbox)
-                .frame(width: 76, alignment: .leading)
-                .help(job.summarize ? "Summary enabled" : "Summary disabled")
-                Text(model.estimatedCostLabel(for: job))
-                    .frame(width: 72, alignment: .leading)
-                Label(model.estimatedTimeLabel(for: job), systemImage: "clock")
-                    .labelStyle(.titleOnly)
-                    .frame(width: 72, alignment: .leading)
-                status
-                actions.frame(width: 58, alignment: .leading)
-            }
+        HStack(alignment: .top, spacing: QueueColumns.spacing) {
+            media
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            languagePicker
+            translationPicker
+            Toggle("", isOn: Binding(
+                get: { job.summarize },
+                set: { model.setSummarize($0, for: job.id) }
+            ))
+            .labelsHidden()
+            .toggleStyle(.checkbox)
+            .frame(width: QueueColumns.summary, alignment: .leading)
+            .help(job.summarize ? "Summary enabled" : "Summary disabled")
+            Text(model.estimatedCostLabel(for: job))
+                .frame(width: QueueColumns.price, alignment: .leading)
+            Text(model.estimatedTimeLabel(for: job))
+                .frame(width: QueueColumns.time, alignment: .leading)
+            status
+            actions.frame(width: QueueColumns.actions, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
@@ -261,7 +281,6 @@ private struct QueueRow: View {
                 .foregroundStyle(.secondary)
             }
         }
-        .gridColumnAlignment(.leading)
     }
 
     private var languagePicker: some View {
@@ -272,7 +291,7 @@ private struct QueueRow: View {
             ForEach(LanguageCatalog.all) { Text($0.name).tag($0.locale) }
         }
         .labelsHidden()
-        .frame(width: 112)
+        .frame(width: QueueColumns.spoken, alignment: .leading)
         .disabled(job.state.isProcessing || [.ready].contains(job.state))
     }
 
@@ -287,7 +306,7 @@ private struct QueueRow: View {
             }
         }
         .labelsHidden()
-        .frame(width: 112)
+        .frame(width: QueueColumns.translation, alignment: .leading)
         .disabled(job.state.isProcessing)
     }
 
@@ -303,7 +322,7 @@ private struct QueueRow: View {
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .frame(width: 138, alignment: .leading)
+        .frame(width: QueueColumns.status, alignment: .leading)
     }
 
     private var actions: some View {
