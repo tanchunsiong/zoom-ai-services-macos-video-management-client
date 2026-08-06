@@ -61,7 +61,9 @@ object, or a full ASR payload containing `config.vocabulary`. The app validates 
 pronunciations, and aliases locally, remembers the JSON between launches, and sends the
 vocabulary object as `config.vocabulary` in the Live session update. A ready-to-use
 example is provided on first launch. Stopping drains buffered frames and waits for Zoom
-to finalize the last speech turn.
+to finalize the last speech turn. The Live update also mirrors language, audio format,
+and vocabulary in the deployed top-level schema while Zoom transitions to the nested
+configuration contract.
 
 ## Build an app bundle
 

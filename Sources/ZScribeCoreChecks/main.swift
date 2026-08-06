@@ -146,16 +146,24 @@ struct CoreChecks {
         let config = root?["config"] as? [String: Any]
         let audio = root?["audio"] as? [String: Any]
         let vocabulary = config?["vocabulary"] as? [String: Any]
+        let legacyVocabulary = root?["vocabulary"] as? [String: Any]
         try expect(root?["type"] as? String == "session.update", "Live session type")
         try expect(audio?["format"] as? String == "pcm16", "Live PCM format")
         try expect(config?["language"] as? String == "ja-JP", "Live language")
         try expect(config?["turn_detection"] == nil, "Live VAD configuration omitted")
-        try expect(root?["language"] == nil, "Legacy top-level Live language omitted")
-        try expect(root?["vocabulary"] == nil, "Legacy top-level vocabulary omitted")
-        try expect(root?["input_audio_format"] == nil, "Legacy Live audio format omitted")
+        try expect(root?["language"] as? String == "ja-JP", "Deployed Live language")
+        try expect(
+            root?["input_audio_format"] as? String == "pcm16",
+            "Deployed Live audio format"
+        )
+        try expect(root?["turn_detection"] == nil, "Deployed Live VAD omitted")
         try expect(
             vocabulary?["phrases"] as? [String] == ["AIAGW", "Zoom AI Companion"],
-            "Live vocabulary phrases"
+            "Current Live vocabulary phrases"
+        )
+        try expect(
+            legacyVocabulary?["phrases"] as? [String] == ["AIAGW", "Zoom AI Companion"],
+            "Deployed Live vocabulary phrases"
         )
 
         for language in LanguageCatalog.all {
@@ -168,7 +176,11 @@ struct CoreChecks {
             let languageConfig = languageRoot?["config"] as? [String: Any]
             try expect(
                 languageConfig?["language"] as? String == language.locale,
-                "Live selector language \(language.locale)"
+                "Current Live selector language \(language.locale)"
+            )
+            try expect(
+                languageRoot?["language"] as? String == language.locale,
+                "Deployed Live selector language \(language.locale)"
             )
         }
 
@@ -178,6 +190,7 @@ struct CoreChecks {
         let blankRoot = try JSONSerialization.jsonObject(with: blankData) as? [String: Any]
         let blankConfig = blankRoot?["config"] as? [String: Any]
         try expect(blankConfig?["vocabulary"] == nil, "Blank Live vocabulary omitted")
+        try expect(blankRoot?["vocabulary"] == nil, "Blank deployed vocabulary omitted")
 
         let fullConfig = #"""
         {

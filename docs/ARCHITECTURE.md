@@ -54,7 +54,9 @@ are not written to disk. ScreenCaptureKit excludes this app's own audio from sys
 capture. The Live session update contains `config.language`, `audio.format`, and, when
 supplied, a validated `config.vocabulary` object. The editor also accepts a complete ASR
 request envelope, but extracts only `config.vocabulary`; batch-only config fields and
-top-level `reference_id` are not forwarded to the Live session.
+top-level `reference_id` are not forwarded to the Live session. Until the deployed Live
+endpoint completes its schema transition, the client mirrors language, PCM format, and
+vocabulary in the accepted top-level fields. Neither form includes VAD configuration.
 
 ## Failure and recovery
 

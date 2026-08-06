@@ -74,14 +74,17 @@ public final class ZoomLiveScribeClient {
     public static func sessionUpdateJSON(_ options: LiveScribeOptions) throws -> String {
         try options.validate()
         var config: [String: Any] = ["language": options.language]
-        if let vocabulary = try ScribeVocabularyJSON.parse(options.vocabularyJSON) {
-            config["vocabulary"] = vocabulary
-        }
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "type": "session.update",
-            "config": config,
+            "input_audio_format": "pcm16",
+            "language": options.language,
             "audio": ["format": "pcm16"]
         ]
+        if let vocabulary = try ScribeVocabularyJSON.parse(options.vocabularyJSON) {
+            config["vocabulary"] = vocabulary
+            payload["vocabulary"] = vocabulary
+        }
+        payload["config"] = config
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
     }
