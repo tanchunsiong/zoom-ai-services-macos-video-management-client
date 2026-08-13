@@ -15,6 +15,7 @@ struct ZScribeMacApp: App {
                     for: NSApplication.willTerminateNotification
                 )) { _ in
                     model.live.abort()
+                    model.closeFloatingCaptions()
                 }
         }
         .defaultSize(width: 1240, height: 780)

@@ -65,6 +65,11 @@ to finalize the last speech turn. The Live update also mirrors language, audio f
 and vocabulary in the deployed top-level schema while Zoom transitions to the nested
 configuration contract.
 
+The Live toolbar can open a compact, resizable, always-on-top caption panel for
+placement beneath another video player. It shows only the current interim or latest
+completed caption and its matching translation; each new result replaces the previous
+display. Closing the panel does not stop the Live session.
+
 ## Build an app bundle
 
 ```bash

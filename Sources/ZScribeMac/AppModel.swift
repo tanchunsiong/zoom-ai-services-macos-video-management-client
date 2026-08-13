@@ -49,6 +49,7 @@ final class AppModel: ObservableObject {
 
     let live: LiveModeModel
     let paths: AppPaths
+    private let floatingCaptionWindow = FloatingCaptionWindowController()
     private let store: JSONStore
     private let credentialStore: FileCredentialStore
     private let zoom = ZoomAIClient()
@@ -72,6 +73,14 @@ final class AppModel: ObservableObject {
     var selectedJob: QueueJob? {
         guard let selectedJobID else { return jobs.first(where: \.canReview) }
         return jobs.first { $0.id == selectedJobID }
+    }
+
+    func showFloatingCaptions() {
+        floatingCaptionWindow.show(model: live)
+    }
+
+    func closeFloatingCaptions() {
+        floatingCaptionWindow.close()
     }
 
     var queueEstimate: CostBreakdown {

@@ -98,6 +98,16 @@ final class LiveModeModel: ObservableObject {
             ? interimTranscript
             : "..." + interimTranscript.suffix(320)
     }
+    var floatingCaptionText: String {
+        interimTranscript.isEmpty
+            ? segments.last?.text ?? ""
+            : interimCaptionText
+    }
+    var floatingTranslationText: String {
+        interimTranscript.isEmpty
+            ? segments.last?.translation ?? ""
+            : ""
+    }
     var vocabularyError: String? {
         do {
             _ = try ScribeVocabularyJSON.parse(vocabularyJSON)

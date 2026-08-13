@@ -3,6 +3,7 @@ import ZScribeCore
 
 struct LiveView: View {
     @ObservedObject var model: LiveModeModel
+    let openFloatingCaptions: () -> Void
 
     var body: some View {
         HSplitView {
@@ -14,6 +15,11 @@ struct LiveView: View {
         .navigationTitle("Live Transcription")
         .toolbar {
             ToolbarItemGroup {
+                Button(action: openFloatingCaptions) {
+                    Label("Floating Captions", systemImage: "macwindow.on.rectangle")
+                }
+                .help("Open floating captions")
+
                 Button {
                     model.copyTranscript()
                 } label: {

@@ -30,7 +30,10 @@ struct ContentView: View {
             Group {
                 switch model.selectedSection ?? .queue {
                 case .queue: QueueView()
-                case .live: LiveView(model: model.live)
+                case .live: LiveView(
+                    model: model.live,
+                    openFloatingCaptions: model.showFloatingCaptions
+                )
                 case .review: ReviewView()
                 case .settings: SettingsView()
                 }
