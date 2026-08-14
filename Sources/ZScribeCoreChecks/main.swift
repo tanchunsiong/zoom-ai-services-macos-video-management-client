@@ -125,6 +125,25 @@ struct CoreChecks {
             PCM16AudioProcessor.normalizedMeter(-30) == 0.5,
             "Live normalized meter"
         )
+
+        func pcm16(_ samples: [Int16]) -> Data {
+            var data = Data()
+            for var sample in samples.map(\.littleEndian) {
+                withUnsafeBytes(of: &sample) { data.append(contentsOf: $0) }
+            }
+            return data
+        }
+        let mixed = PCM16MonoMixer.mix(
+            pcm16([1_000, -1_000, 30_000]),
+            pcm16([3_000, -3_000, 30_000])
+        )
+        let mixedSamples = mixed.withUnsafeBytes {
+            Array($0.bindMemory(to: Int16.self)).map(Int16.init(littleEndian:))
+        }
+        try expect(
+            mixedSamples == [2_000, -2_000, 30_000],
+            "Live microphone and system audio mix"
+        )
     }
 
     static func liveSessionContractAndEvents() throws {

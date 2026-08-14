@@ -56,6 +56,11 @@ language, and start the session. macOS requests Microphone permission for microp
 capture and Screen and System Audio Recording permission for the system mix. Live PCM
 and transcripts remain in memory unless the transcript is explicitly copied.
 
+The `Mic + System` source captures both inputs concurrently, converts each to mono
+16 kHz PCM, and mixes them into the single PCM stream accepted by Zoom Live. Both
+sources are transcribed, but Live results do not identify whether words came from the
+microphone or system audio.
+
 The optional vocabulary editor accepts a vocabulary object, a top-level `vocabulary`
 object, or a full ASR payload containing `config.vocabulary`. The app validates phrases,
 pronunciations, and aliases locally, remembers the JSON between launches, and sends the

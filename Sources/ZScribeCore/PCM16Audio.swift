@@ -100,6 +100,30 @@ public final class PCM16AudioProcessor {
     }
 }
 
+public enum PCM16MonoMixer {
+    public static func mix(_ first: Data, _ second: Data) -> Data {
+        precondition(first.count == second.count)
+        precondition(first.count.isMultiple(of: 2))
+
+        var output = Data(count: first.count)
+        first.withUnsafeBytes { firstBytes in
+            second.withUnsafeBytes { secondBytes in
+                output.withUnsafeMutableBytes { outputBytes in
+                    let firstSamples = firstBytes.bindMemory(to: Int16.self)
+                    let secondSamples = secondBytes.bindMemory(to: Int16.self)
+                    let outputSamples = outputBytes.bindMemory(to: Int16.self)
+                    for index in firstSamples.indices {
+                        let firstValue = Int32(Int16(littleEndian: firstSamples[index]))
+                        let secondValue = Int32(Int16(littleEndian: secondSamples[index]))
+                        outputSamples[index] = Int16((firstValue + secondValue) / 2).littleEndian
+                    }
+                }
+            }
+        }
+        return output
+    }
+}
+
 public struct PCM16FrameAssembler: Sendable {
     public static let defaultFrameBytes = 16_000 * 2 / 10
     private let frameBytes: Int

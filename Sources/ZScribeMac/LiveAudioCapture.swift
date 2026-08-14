@@ -7,12 +7,14 @@ import ZScribeCore
 enum LiveAudioSource: String, CaseIterable, Identifiable {
     case microphone = "Microphone"
     case systemAudio = "System Audio"
+    case combined = "Mic + System"
 
     var id: Self { self }
     var symbol: String {
         switch self {
         case .microphone: "mic"
         case .systemAudio: "speaker.wave.2"
+        case .combined: "waveform"
         }
     }
 }
@@ -29,12 +31,18 @@ final class LiveAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     private let audioProcessor = PCM16AudioProcessor()
     private var assembler = PCM16FrameAssembler()
     private var continuation: AsyncStream<Data>.Continuation
-    private var converter: AVAudioConverter?
-    private var converterSourceFormat: AVAudioFormat?
+    private var microphoneConverter: AVAudioConverter?
+    private var microphoneSourceFormat: AVAudioFormat?
+    private var systemConverter: AVAudioConverter?
+    private var systemSourceFormat: AVAudioFormat?
+    private var microphonePending = Data()
+    private var systemPending = Data()
     private var engine: AVAudioEngine?
     private var screenStream: SCStream?
     private var silenceTimer: DispatchSourceTimer?
-    private var lastAudioAt = ContinuousClock.now
+    private var lastMicrophoneAudioAt = ContinuousClock.now
+    private var lastSystemAudioAt = ContinuousClock.now
+    private var combinedReady = false
     private var stopped = false
     private let onLevel: @Sendable (PCM16LevelReading) -> Void
 
@@ -57,14 +65,21 @@ final class LiveAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
     func start() async throws {
         switch source {
         case .microphone:
-            guard await AVCaptureDevice.requestAccess(for: .audio) else {
-                throw captureError(
-                    "Microphone access is required. Enable it in System Settings > Privacy & Security > Microphone."
-                )
-            }
+            try await requestMicrophoneAccess()
             try startMicrophone()
         case .systemAudio:
             try await startSystemAudio()
+        case .combined:
+            try await requestMicrophoneAccess()
+            try startMicrophone()
+            try await startSystemAudio()
+            await processingQueue.asyncResult {
+                self.microphonePending.removeAll(keepingCapacity: true)
+                self.systemPending.removeAll(keepingCapacity: true)
+                self.lastMicrophoneAudioAt = .now
+                self.lastSystemAudioAt = .now
+                self.combinedReady = true
+            }
         }
     }
 
@@ -84,6 +99,9 @@ final class LiveAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
             self.screenStream = nil
         }
         await processingQueue.asyncResult {
+            if self.source == .combined {
+                self.drainCombinedAudio()
+            }
             if let remainder = self.assembler.drain() {
                 self.continuation.yield(remainder)
             }
@@ -108,6 +126,14 @@ final class LiveAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         resetMeter()
     }
 
+    private func requestMicrophoneAccess() async throws {
+        guard await AVCaptureDevice.requestAccess(for: .audio) else {
+            throw captureError(
+                "Microphone access is required. Enable it in System Settings > Privacy & Security > Microphone."
+            )
+        }
+    }
+
     private func startMicrophone() throws {
         let engine = AVAudioEngine()
         let input = engine.inputNode
@@ -120,7 +146,7 @@ final class LiveAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
             bufferSize: 4_096,
             format: format
         ) { [weak self] buffer, _ in
-            self?.enqueue(buffer)
+            self?.enqueue(buffer, input: .microphone)
         }
         engine.prepare()
         do {
@@ -197,24 +223,42 @@ final class LiveAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
                     bufferListNoCopy: audioBufferList.unsafePointer
                 ) else { return }
                 buffer.frameLength = AVAudioFrameCount(sampleBuffer.numSamples)
-                process(buffer)
+                process(buffer, input: .system)
             }
         } catch {
             continuation.finish()
         }
     }
 
-    private func enqueue(_ buffer: AVAudioPCMBuffer) {
+    private enum CaptureInput {
+        case microphone
+        case system
+    }
+
+    private func enqueue(_ buffer: AVAudioPCMBuffer, input: CaptureInput) {
         let copied = copy(buffer)
         processingQueue.async { [weak self] in
-            self?.process(copied)
+            self?.process(copied, input: input)
         }
     }
 
-    private func process(_ buffer: AVAudioPCMBuffer) {
-        guard !stopped, let data = convertToPCM16(buffer), !data.isEmpty else { return }
-        lastAudioAt = .now
-        emit(data)
+    private func process(_ buffer: AVAudioPCMBuffer, input: CaptureInput) {
+        guard !stopped,
+              source != .combined || combinedReady,
+              let data = convertToPCM16(buffer, input: input),
+              !data.isEmpty
+        else { return }
+        switch input {
+        case .microphone:
+            lastMicrophoneAudioAt = .now
+        case .system:
+            lastSystemAudioAt = .now
+        }
+        if source == .combined {
+            appendCombined(data, input: input)
+        } else {
+            emit(data)
+        }
     }
 
     private func emit(_ sourceData: Data) {
@@ -226,16 +270,34 @@ final class LiveAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         onLevel(reading)
     }
 
-    private func convertToPCM16(_ input: AVAudioPCMBuffer) -> Data? {
+    private func convertToPCM16(
+        _ input: AVAudioPCMBuffer,
+        input captureInput: CaptureInput
+    ) -> Data? {
         let target = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: 16_000,
             channels: 1,
             interleaved: true
         )!
-        if converter == nil || converterSourceFormat != input.format {
-            converter = AVAudioConverter(from: input.format, to: target)
-            converterSourceFormat = input.format
+        switch captureInput {
+        case .microphone:
+            if microphoneConverter == nil || microphoneSourceFormat != input.format {
+                microphoneConverter = AVAudioConverter(from: input.format, to: target)
+                microphoneSourceFormat = input.format
+            }
+        case .system:
+            if systemConverter == nil || systemSourceFormat != input.format {
+                systemConverter = AVAudioConverter(from: input.format, to: target)
+                systemSourceFormat = input.format
+            }
+        }
+        let converter: AVAudioConverter?
+        switch captureInput {
+        case .microphone:
+            converter = microphoneConverter
+        case .system:
+            converter = systemConverter
         }
         guard let converter else { return nil }
         let capacity = AVAudioFrameCount(
@@ -265,6 +327,45 @@ final class LiveAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         return Data(bytes: bytes, count: Int(audioBuffer.mDataByteSize))
     }
 
+    private func appendCombined(_ data: Data, input: CaptureInput) {
+        switch input {
+        case .microphone:
+            microphonePending.append(data)
+        case .system:
+            systemPending.append(data)
+        }
+        emitAvailableCombinedAudio()
+    }
+
+    private func emitAvailableCombinedAudio() {
+        let byteCount = min(microphonePending.count, systemPending.count)
+        let completeByteCount = byteCount - byteCount % 2
+        guard completeByteCount > 0 else { return }
+        let microphone = Data(microphonePending.prefix(completeByteCount))
+        let system = Data(systemPending.prefix(completeByteCount))
+        microphonePending.removeFirst(completeByteCount)
+        systemPending.removeFirst(completeByteCount)
+        emit(PCM16MonoMixer.mix(microphone, system))
+    }
+
+    private func drainCombinedAudio() {
+        let byteCount = max(microphonePending.count, systemPending.count)
+        guard byteCount > 0 else { return }
+        if microphonePending.count < byteCount {
+            microphonePending.append(Data(
+                repeating: 0,
+                count: byteCount - microphonePending.count
+            ))
+        }
+        if systemPending.count < byteCount {
+            systemPending.append(Data(
+                repeating: 0,
+                count: byteCount - systemPending.count
+            ))
+        }
+        emitAvailableCombinedAudio()
+    }
+
     private func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer {
         let result = AVAudioPCMBuffer(
             pcmFormat: buffer.format,
@@ -289,18 +390,28 @@ final class LiveAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
         let timer = DispatchSource.makeTimerSource(queue: processingQueue)
         timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
         timer.setEventHandler { [weak self] in
-            guard let self, !self.stopped,
-                  self.lastAudioAt.duration(to: .now) >= .milliseconds(150)
-            else { return }
-            self.continuation.yield(
-                Data(repeating: 0, count: PCM16FrameAssembler.defaultFrameBytes)
+            guard let self, !self.stopped else { return }
+            let silence = Data(
+                repeating: 0,
+                count: PCM16FrameAssembler.defaultFrameBytes
             )
-            self.onLevel(PCM16LevelReading(
-                peakDBFS: -.infinity,
-                rmsDBFS: -.infinity,
-                isClipping: false,
-                appliedGain: 1
-            ))
+            if self.source == .combined {
+                guard self.combinedReady else { return }
+                if self.lastMicrophoneAudioAt.duration(to: .now) >= .milliseconds(150) {
+                    self.appendCombined(silence, input: .microphone)
+                }
+                if self.lastSystemAudioAt.duration(to: .now) >= .milliseconds(150) {
+                    self.appendCombined(silence, input: .system)
+                }
+            } else if self.lastSystemAudioAt.duration(to: .now) >= .milliseconds(150) {
+                self.continuation.yield(silence)
+                self.onLevel(PCM16LevelReading(
+                    peakDBFS: -.infinity,
+                    rmsDBFS: -.infinity,
+                    isClipping: false,
+                    appliedGain: 1
+                ))
+            }
         }
         silenceTimer = timer
         timer.resume()

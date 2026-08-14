@@ -105,9 +105,14 @@ final class LiveModeModel: ObservableObject {
         "\(segments.count) completed segment\(segments.count == 1 ? "" : "s")"
     }
     var sourceDetail: String {
-        source == .microphone
-            ? "Default microphone"
-            : "Mac system audio mix"
+        switch source {
+        case .microphone:
+            "Default microphone"
+        case .systemAudio:
+            "Mac system audio mix"
+        case .combined:
+            "Microphone and system audio mixed into one Live stream"
+        }
     }
     var interimCaptionText: String {
         interimTranscript.count <= 320
@@ -260,9 +265,14 @@ final class LiveModeModel: ObservableObject {
 
             clearTranscript()
             isConnecting = true
-            status = source == .microphone
-                ? "Starting microphone..."
-                : "Starting system audio..."
+            switch source {
+            case .microphone:
+                status = "Starting microphone..."
+            case .systemAudio:
+                status = "Starting system audio..."
+            case .combined:
+                status = "Starting microphone and system audio..."
+            }
             resetMeter()
 
             let capture = LiveAudioCapture(
