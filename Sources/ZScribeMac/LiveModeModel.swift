@@ -55,12 +55,18 @@ final class LiveModeModel: ObservableObject {
     @Published private(set) var inputLevelState = AudioMeterState.normal
     @Published private(set) var interimTranscript = ""
     @Published private(set) var segments: [LiveTranscriptSegment] = []
+    @Published private(set) var liveSummary = ""
+    @Published private(set) var summaryError: String?
+    @Published private(set) var isSummarizing = false
+    @Published private(set) var summarySegmentCount = 0
 
     private let credentialStore: FileCredentialStore
     private let client = ZoomLiveScribeClient()
     private let translator = ZoomAIClient()
     private var capture: LiveAudioCapture?
     private var sessionTask: Task<Void, Never>?
+    private var summaryTask: Task<Void, Never>?
+    private var summaryRequestID: UUID?
     private var translationTasks: [UUID: Task<Void, Never>] = [:]
     private var clipHoldUntil = Date.distantPast
 
@@ -84,6 +90,16 @@ final class LiveModeModel: ObservableObject {
                 return value
             }
         }.joined(separator: "\n")
+    }
+    var summaryTranscriptText: String {
+        segments.map(\.text).joined(separator: "\n")
+    }
+    var summaryCoverageLabel: String {
+        let suffix = summarySegmentCount == 1 ? "" : "s"
+        if summarySegmentCount == segments.count {
+            return "\(summarySegmentCount) captured segment\(suffix)"
+        }
+        return "\(summarySegmentCount) of \(segments.count) captured segments"
     }
     var segmentCountLabel: String {
         "\(segments.count) completed segment\(segments.count == 1 ? "" : "s")"
@@ -145,20 +161,31 @@ final class LiveModeModel: ObservableObject {
     func abort() {
         capture?.abort()
         sessionTask?.cancel()
+        summaryTask?.cancel()
         capture = nil
         sessionTask = nil
+        summaryTask = nil
+        summaryRequestID = nil
         isConnecting = false
         isStreaming = false
         isStopping = false
         isSpeechActive = false
+        isSummarizing = false
         resetMeter()
     }
 
     func clearTranscript() {
+        summaryTask?.cancel()
+        summaryTask = nil
+        summaryRequestID = nil
         translationTasks.values.forEach { $0.cancel() }
         translationTasks.removeAll()
         segments.removeAll()
         interimTranscript = ""
+        liveSummary = ""
+        summaryError = nil
+        summarySegmentCount = 0
+        isSummarizing = false
     }
 
     func copyTranscript() {
@@ -166,6 +193,58 @@ final class LiveModeModel: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(transcriptText, forType: .string)
         status = "Transcript copied"
+    }
+
+    func summarizeTranscript() {
+        guard !isSummarizing else { return }
+        let transcript = summaryTranscriptText
+        guard !transcript.isEmpty else { return }
+        let segmentCount = segments.count
+        let summaryLanguage = language
+        let requestID = UUID()
+
+        liveSummary = ""
+        summaryError = nil
+        summarySegmentCount = segmentCount
+        isSummarizing = true
+        summaryRequestID = requestID
+        summaryTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if summaryRequestID == requestID {
+                    isSummarizing = false
+                    summaryTask = nil
+                    summaryRequestID = nil
+                }
+            }
+            do {
+                guard let credentials = try credentialStore.load(), credentials.isComplete else {
+                    throw liveError("Save Zoom Build credentials in Settings first.")
+                }
+                let result = try await translator.summarize(
+                    transcript,
+                    language: summaryLanguage,
+                    credentials: credentials
+                )
+                try Task.checkCancellation()
+                let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else {
+                    throw liveError("Zoom Summarizer returned an empty summary.")
+                }
+                guard summaryRequestID == requestID else { return }
+                liveSummary = text
+            } catch is CancellationError {
+            } catch {
+                guard summaryRequestID == requestID else { return }
+                summaryError = error.localizedDescription
+            }
+        }
+    }
+
+    func copySummary() {
+        guard !liveSummary.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(liveSummary, forType: .string)
     }
 
     private func runSession() async {

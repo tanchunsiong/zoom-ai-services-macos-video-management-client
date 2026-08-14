@@ -367,7 +367,7 @@ struct ReviewView: View {
     }
 }
 
-private struct SummaryDocumentView: View {
+struct SummaryDocumentView: View {
     private enum BlockKind {
         case heading(Int)
         case paragraph

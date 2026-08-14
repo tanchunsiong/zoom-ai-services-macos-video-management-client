@@ -68,7 +68,10 @@ configuration contract.
 The Live toolbar can open a compact, resizable, always-on-top caption panel for
 placement beneath another video player. It shows only the current interim or latest
 completed caption and its matching translation; each new result replaces the previous
-display. Closing the panel does not stop the Live session.
+display. Closing the panel does not stop the Live session. Completed segments appear
+newest-first in the main Live view. The Summarize button sends a snapshot of the
+captured source transcript to Zoom Summarizer and opens the formatted result in a
+copyable sheet.
 
 ## Build an app bundle
 

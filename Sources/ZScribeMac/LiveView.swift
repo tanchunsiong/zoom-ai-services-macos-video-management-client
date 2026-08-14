@@ -4,6 +4,7 @@ import ZScribeCore
 struct LiveView: View {
     @ObservedObject var model: LiveModeModel
     let openFloatingCaptions: () -> Void
+    @State private var showingSummary = false
 
     var body: some View {
         HSplitView {
@@ -29,6 +30,15 @@ struct LiveView: View {
                 .help("Copy completed transcript")
 
                 Button {
+                    showingSummary = true
+                    model.summarizeTranscript()
+                } label: {
+                    Label("Summarize", systemImage: "text.badge.star")
+                }
+                .disabled(model.segments.isEmpty)
+                .help("Summarize captured transcript")
+
+                Button {
                     model.clearTranscript()
                 } label: {
                     Label("Clear Transcript", systemImage: "trash")
@@ -36,6 +46,9 @@ struct LiveView: View {
                 .disabled(model.segments.isEmpty && model.interimTranscript.isEmpty)
                 .help("Clear transcript")
             }
+        }
+        .sheet(isPresented: $showingSummary) {
+            LiveSummarySheet(model: model)
         }
     }
 
@@ -182,37 +195,39 @@ struct LiveView: View {
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    List(model.segments) { segment in
-                        HStack(alignment: .top, spacing: 12) {
-                            Text("\(segment.number)")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .frame(width: 28, alignment: .trailing)
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Text(segment.text)
-                                        .textSelection(.enabled)
-                                    Spacer(minLength: 8)
-                                    Text(segment.at, style: .time)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    if segment.isTranslating {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    } else if let error = segment.translationError {
-                                        Image(systemName: "exclamationmark.triangle")
-                                            .foregroundStyle(.red)
-                                            .help(error)
+                    List {
+                        ForEach(model.segments.reversed()) { segment in
+                            HStack(alignment: .top, spacing: 12) {
+                                Text("\(segment.number)")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 28, alignment: .trailing)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Text(segment.text)
+                                            .textSelection(.enabled)
+                                        Spacer(minLength: 8)
+                                        Text(segment.at, style: .time)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if segment.isTranslating {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        } else if let error = segment.translationError {
+                                            Image(systemName: "exclamationmark.triangle")
+                                                .foregroundStyle(.red)
+                                                .help(error)
+                                        }
+                                    }
+                                    if let translation = segment.translation {
+                                        Text(translation)
+                                            .foregroundStyle(.secondary)
+                                            .textSelection(.enabled)
                                     }
                                 }
-                                if let translation = segment.translation {
-                                    Text(translation)
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                }
                             }
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
                     }
                     .listStyle(.inset)
                 }
@@ -288,5 +303,84 @@ struct LiveView: View {
         case .warning: .orange
         case .clipping: .red
         }
+    }
+}
+
+private struct LiveSummarySheet: View {
+    @ObservedObject var model: LiveModeModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label("Live Summary", systemImage: "text.badge.star")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .help("Close")
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+
+            Divider()
+
+            Group {
+                if model.isSummarizing && model.liveSummary.isEmpty {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Summarizing captured transcript...")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = model.summaryError {
+                    ContentUnavailableView {
+                        Label("Summary Failed", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Try Again") {
+                            model.summarizeTranscript()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if !model.liveSummary.isEmpty {
+                    ScrollView {
+                        SummaryDocumentView(text: model.liveSummary)
+                            .padding(18)
+                    }
+                } else {
+                    ContentUnavailableView("No Summary", systemImage: "text.badge.star")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Text(model.summaryCoverageLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    model.copySummary()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                .disabled(model.liveSummary.isEmpty)
+                Button {
+                    model.summarizeTranscript()
+                } label: {
+                    Label("Regenerate", systemImage: "arrow.clockwise")
+                }
+                .disabled(model.isSummarizing || model.segments.isEmpty)
+            }
+            .padding(14)
+        }
+        .frame(minWidth: 560, idealWidth: 680, minHeight: 420, idealHeight: 540)
     }
 }
