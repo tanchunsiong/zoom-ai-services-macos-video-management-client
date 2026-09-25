@@ -109,36 +109,62 @@ final class FloatingCaptionWindowController: NSObject, NSWindowDelegate {
 
 private struct FloatingCaptionView: View {
     @ObservedObject var model: LiveModeModel
+    @AppStorage("floatingCaptionTextSize") private var textSize = 22.0
 
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(spacing: 6) {
-                Spacer(minLength: 0)
-                Text(model.floatingCaptionText.isEmpty
-                     ? "Waiting for speech"
-                     : model.floatingCaptionText)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(
-                        model.floatingCaptionText.isEmpty ? Color.secondary : Color.white
-                    )
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity)
-                if !model.floatingTranslationText.isEmpty {
-                    Text(model.floatingTranslationText)
-                        .font(.system(size: 17))
-                        .foregroundStyle(Color(red: 0.75, green: 0.80, blue: 0.96))
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "textformat.size.smaller")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Slider(value: $textSize, in: 14...48, step: 1)
+                    .frame(width: 150)
+                    .accessibilityLabel("Caption text size")
+                    .help("Caption text size")
+                Image(systemName: "textformat.size.larger")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text("\(Int(textSize))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, alignment: .trailing)
+                    .accessibilityLabel("\(Int(textSize)) points")
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+
+            Divider()
+
+            ScrollView(.vertical) {
+                VStack(spacing: max(4, textSize * 0.27)) {
+                    Spacer(minLength: 0)
+                    Text(model.floatingCaptionText.isEmpty
+                         ? "Waiting for speech"
+                         : model.floatingCaptionText)
+                        .font(.system(size: textSize, weight: .semibold))
+                        .foregroundStyle(
+                            model.floatingCaptionText.isEmpty ? Color.secondary : Color.white
+                        )
                         .multilineTextAlignment(.center)
-                        .lineSpacing(2)
+                        .lineSpacing(max(2, textSize * 0.14))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity)
+                    if !model.floatingTranslationText.isEmpty {
+                        Text(model.floatingTranslationText)
+                            .font(.system(size: max(12, textSize * 0.77)))
+                            .foregroundStyle(Color(red: 0.75, green: 0.80, blue: 0.96))
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(max(2, textSize * 0.1))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .frame(minHeight: 66)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .frame(minHeight: 66)
         }
         .accessibilityLabel("Floating live captions")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
